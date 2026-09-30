@@ -49,10 +49,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) => Scaffold(
         body: SafeArea(
           child: ListView(padding: const EdgeInsets.fromLTRB(24, 30, 24, 26), children: [
-            const Row(children: [
-              Icon(Icons.apartment, color: WmColors.green, size: 40),
-              SizedBox(width: 12),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.asset('assets/icon/workmate-icon-512.png', width: 48, height: 48),
+              ),
+              const SizedBox(width: 12),
+              const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('WorkMate', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
                 Text("Dacs Building Design Services", style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
               ]),
