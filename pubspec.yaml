@@ -1,0 +1,43 @@
+name: workmate
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0+1000
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  crypto: 3.0.7
+  device_info_plus: 13.2.0
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: 11.2.0
+  http: 1.6.0
+  package_info_plus: 10.2.1
+  path_provider: 2.1.6
+  shared_preferences: 2.5.5
+  supabase_flutter: 2.17.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Barlow
+      fonts:
+        - asset: assets/fonts/barlow_regular.ttf
+        - asset: assets/fonts/barlow_semibold.ttf
+          weight: 600
+        - asset: assets/fonts/barlow_bold.ttf
+          weight: 700
+        - asset: assets/fonts/barlow_extrabold.ttf
+          weight: 800
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/ibm_plex_mono_regular.ttf
+        - asset: assets/fonts/ibm_plex_mono_bold.ttf
+          weight: 700
