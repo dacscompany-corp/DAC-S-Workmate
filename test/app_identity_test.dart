@@ -25,6 +25,10 @@ void main() {
     expect(gradle, contains('minSdk = 24'));
   });
 
+  test('the emulator-only x86_64 engine stays out of the APK (50 MB bucket limit)', () {
+    expect(gradle, contains('excludes += "lib/x86_64/**"'));
+  });
+
   test('a release never builds without the upload key', () {
     expect(gradle, contains('keystore.properties is missing'));
   });

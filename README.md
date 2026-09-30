@@ -16,7 +16,9 @@ Design and rules: `Dacs Web/docs/superpowers/specs/2026-09-29-unified-worker-app
 
 - Bump `version:` in `pubspec.yaml` on EVERY release. The number after `+` is the versionCode:
   it must be 1000 or higher and higher than the last published WorkMate build (server rule 0082).
-- The release APK must stay under 50 MB (the `app-releases` bucket limit).
+- The release APK must stay under 50 MB (the `app-releases` bucket limit). It carries only the ARM
+  engines (armeabi-v7a, arm64-v8a): `build.gradle.kts` excludes `lib/x86_64` (emulator-only, ~18 MB).
+  0.1.0 was 31 MB. Because of this, the app does not run on x86_64 emulators; test on a real phone.
 - Publish from Dacs Web → App Updates. It recognises `com.dacs.workmate` and files it under the
   WorkMate stream. Publishing makes the update REQUIRED for every WorkMate phone.
 

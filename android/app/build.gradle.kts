@@ -43,6 +43,18 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["appLabel"] = "DAC'S WorkMate"
+
+    }
+
+    // Workers' phones are ARM. The x86_64 copy of the engine (~18 MB) only serves
+    // emulators and pushed the universal release APK to 50.7 MB, against the 50 MB
+    // `app-releases` bucket limit. Excluded at packaging (Flutter's plugin overrides
+    // ndk.abiFilters). Still ONE APK with ONE versionCode -- never split per ABI:
+    // that rewrites versionCode and the server then refuses those phones.
+    packaging {
+        jniLibs {
+            excludes += "lib/x86_64/**"
+        }
     }
 
     signingConfigs {
