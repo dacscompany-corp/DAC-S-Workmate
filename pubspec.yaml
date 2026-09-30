@@ -46,7 +46,7 @@ flutter:
         - asset: assets/fonts/ibm_plex_mono_bold.ttf
           weight: 700
 
-# Launcher icon: the "2a Square frame" WorkMate mark (WorkMate Logo Redesign, 2026-09-30).
+# Launcher icon: the "2b Gable frame" WorkMate mark (WorkMate Logo Redesign, 2026-09-30).
 # Regenerate after changing an image: dart run flutter_launcher_icons
 flutter_launcher_icons:
   android: true
@@ -56,5 +56,5 @@ flutter_launcher_icons:
   # Android 8+ shaped icons: the mark on the app's own green (#1A5C3A, WmColors.green).
   adaptive_icon_background: "#1A5C3A"
   adaptive_icon_foreground: "assets/icon/adaptive-foreground-432.png"
-  # The designer's foreground already sits in the 66dp safe zone: no extra inset.
-  adaptive_icon_foreground_inset: 0
+  # 2b's base corners reach past the 66dp circular safe zone; 7% keeps them inside circle masks.
+  adaptive_icon_foreground_inset: 7
