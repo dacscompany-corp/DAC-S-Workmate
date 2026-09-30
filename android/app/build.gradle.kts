@@ -87,6 +87,11 @@ flutter {
 dependencies {
     // FileProvider, for handing the verified update APK to the system installer.
     implementation("androidx.core:core-ktx:1.13.1")
+    // Fresh fused fixes with mock detection (AttendanceBridge.currentFix).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // EXIF rotation + mirror of front-camera captures (PhotoPreparer).
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // A release signed with the wrong key (or none) can never update an installed

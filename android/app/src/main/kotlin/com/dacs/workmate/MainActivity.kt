@@ -45,6 +45,9 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.dacs.workmate/attendance")
+            .setMethodCallHandler(AttendanceBridge(applicationContext))
     }
 
     private fun openInstallPermission() {
