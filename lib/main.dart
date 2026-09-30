@@ -39,6 +39,11 @@ Future<void> main() async {
     publishableKey: AppConfig.supabaseAnonKey,
     httpClient: httpClient,
     authOptions: FlutterAuthClientOptions(localStorage: sessionStorage),
+    // postgrest retries a failed read 3 times with 2 s / 4 s / 8 s back-off by
+    // default. Offline that held the launch on a spinner for ~15 s before the
+    // app's own fallback (the profile saved on this phone) could answer. The
+    // app already falls back on the first failure, like the Attendance app.
+    postgrestOptions: const PostgrestClientOptions(retryEnabled: false),
   );
   final client = Supabase.instance.client;
 
