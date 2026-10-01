@@ -2,6 +2,7 @@ package com.dacs.workmate
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
@@ -46,18 +47,27 @@ class AttendanceBridge(private val context: Context) : MethodChannel.MethodCallH
                 val source = call.argument<String>("source")
                 val target = call.argument<String>("target")
                 val caption = call.argument<String>("caption")
+                val mirror = call.argument<Boolean>("mirror") ?: false
                 if (source == null || target == null || caption == null) {
                     result.error("BAD_ARGS", "source, target and caption are required", null)
                     return
                 }
                 io.execute {
                     try {
-                        PhotoPreparer.prepare(File(source), File(target), caption)
+                        PhotoPreparer.prepare(File(source), File(target), caption, mirror)
                         main.post { result.success(target) }
                     } catch (e: Throwable) {
                         // Includes OutOfMemoryError: Dart must always be answered.
                         main.post { result.error("PHOTO_FAILED", e.message, null) }
                     }
+                }
+            }
+            "openLocationSettings" -> {
+                try {
+                    context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("NO_SETTINGS", e.message, null)
                 }
             }
             else -> result.notImplemented()

@@ -20,6 +20,8 @@ void main() {
           return {'latitude': 14.5, 'longitude': 121.0, 'accuracyMetres': 8.5, 'isMock': false};
         case 'preparePhoto':
           return (call.arguments as Map)['target'];
+        case 'openLocationSettings':
+          return null;
       }
       return null;
     });
@@ -52,6 +54,16 @@ void main() {
   test('preparePhoto passes source, target and caption', () async {
     final out = await MethodChannelDeviceBridge().preparePhoto(source: '/c/raw.jpg', target: '/f/e.jpg', caption: 'A · 1 Sep 2026 · 3:00 PM');
     expect(out, '/f/e.jpg');
-    expect(calls.single.arguments, {'source': '/c/raw.jpg', 'target': '/f/e.jpg', 'caption': 'A · 1 Sep 2026 · 3:00 PM'});
+    expect(calls.single.arguments, {'source': '/c/raw.jpg', 'target': '/f/e.jpg', 'caption': 'A · 1 Sep 2026 · 3:00 PM', 'mirror': false});
+  });
+
+  test('a front-camera photo asks the phone to mirror it', () async {
+    await MethodChannelDeviceBridge().preparePhoto(source: '/c/raw.jpg', target: '/f/e.jpg', caption: 'A', mirror: true);
+    expect((calls.single.arguments as Map)['mirror'], isTrue);
+  });
+
+  test("the phone's Location switch screen is opened natively", () async {
+    await MethodChannelDeviceBridge().openLocationSettings();
+    expect(calls.single.method, 'openLocationSettings');
   });
 }

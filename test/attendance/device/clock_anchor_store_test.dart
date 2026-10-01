@@ -14,7 +14,9 @@ class FakeBridge implements DeviceBridge {
   @override
   Future<DeviceFix> currentFix() async => const DeviceFix();
   @override
-  Future<String> preparePhoto({required String source, required String target, required String caption}) async => target;
+  Future<String> preparePhoto({required String source, required String target, required String caption, bool mirror = false}) async => target;
+  @override
+  Future<void> openLocationSettings() async {}
 }
 
 class ThrowingBridge extends FakeBridge {

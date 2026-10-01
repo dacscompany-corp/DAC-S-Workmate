@@ -23,8 +23,11 @@ private const val JPEG_QUALITY = 80
  */
 object PhotoPreparer {
 
-    fun prepare(source: File, target: File, caption: String) {
-        val upright = decodeUpright(source)
+    fun prepare(source: File, target: File, caption: String, mirror: Boolean = false) {
+        val decoded = decodeUpright(source)
+        // The front camera is filed AS PREVIEWED (mirrored), as DACS Attendance
+        // files it: the worker approves the mirror image, so the record matches it.
+        val upright = if (mirror) mirrored(decoded) else decoded
         val scaled = scaleToBudget(upright)
         if (scaled !== upright) upright.recycle()
         drawCaption(scaled, caption)
@@ -70,6 +73,13 @@ object PhotoPreparer {
         val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         if (rotated !== bitmap) bitmap.recycle()
         return rotated
+    }
+
+    /** Flips an already-upright bitmap left to right. */
+    private fun mirrored(bitmap: Bitmap): Bitmap {
+        val flipped = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postScale(-1f, 1f) }, true)
+        if (flipped !== bitmap) bitmap.recycle()
+        return flipped
     }
 
     private fun scaleToBudget(bitmap: Bitmap): Bitmap {

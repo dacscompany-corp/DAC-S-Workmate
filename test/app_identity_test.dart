@@ -61,11 +61,31 @@ void main() {
 
   test('nothing tells anyone to split the APK per ABI', () {
     const banned = 'split' '-per-abi';
-    for (final f in Directory('.').listSync(recursive: true).whereType<File>()) {
+    // Walk by hand so build output is never entered: once the plugins build, its
+    // paths pass Windows' length limit and a recursive listing throws.
+    Iterable<File> walk(Directory d) sync* {
+      for (final e in d.listSync()) {
+        final name = e.path.replaceAll(r'\', '/').split('/').last;
+        if (name == 'build' || name == '.dart_tool' || name == '.git' || name == '.gradle') continue;
+        if (e is Directory) {
+          yield* walk(e);
+        } else if (e is File) {
+          yield e;
+        }
+      }
+    }
+
+    for (final f in walk(Directory('.'))) {
       final p = f.path.replaceAll(r'\', '/');
       if (p.contains('/build/') || p.contains('/.dart_tool/') || p.contains('/.git/')) continue;
       if (!RegExp(r'\.(md|ps1|sh|yaml|kts|gradle)$').hasMatch(p)) continue;
       expect(f.readAsStringSync().contains(banned), isFalse, reason: p);
     }
+  });
+
+  test('attendance can ask for the camera and the location', () {
+    expect(manifest, contains('android.permission.CAMERA'));
+    expect(manifest, contains('android.permission.ACCESS_FINE_LOCATION'));
+    expect(manifest, contains('android.permission.ACCESS_COARSE_LOCATION'));
   });
 }

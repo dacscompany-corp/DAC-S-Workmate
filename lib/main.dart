@@ -1,18 +1,27 @@
+import 'dart:io';
+
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'app.dart';
 import 'app_controller.dart';
+import 'attendance/attendance_services.dart';
+import 'attendance/data/attendance_db.dart';
+import 'attendance/data/attendance_photos.dart';
+import 'attendance/data/attendance_remote.dart';
+import 'attendance/data/attendance_repository.dart';
 import 'attendance/device/clock_anchor_store.dart';
 import 'attendance/device/device_bridge.dart';
 import 'attendance/sync/background_sync.dart';
 import 'attendance/sync/sync_host.dart';
 import 'attendance/sync/upload_scheduler.dart';
+import 'attendance/ui/attendance_copy.dart';
 import 'auth/auth_backend.dart';
 import 'auth/auth_repository.dart';
 import 'auth/session_storage.dart';
@@ -50,14 +59,16 @@ Future<void> main() async {
   final client = await initWorkMateSupabase(httpClient: httpClient, localStorage: sessionStorage);
 
   // The live app is the one token refresher: background tasks delegate here.
-  AttendanceSyncHost(drain: () => syncWith(client)).register();
+  // Registered again on every resume (a slow answer can drop the mapping).
+  final syncHost = AttendanceSyncHost(drain: () => syncWith(client))..register();
 
-  // Background sending of queued Time Ins / Time Outs (0C). The sweeper is the
-  // backstop for a row whose enqueue never happened (process killed mid-submit).
-  // The app must start even if background setup fails.
+  // Background sending of queued Time Ins / Time Outs. The sweeper is the
+  // backstop for a row whose enqueue never happened. The app must start even
+  // if background setup fails.
+  final scheduler = WorkmanagerUploadScheduler();
   try {
     await Workmanager().initialize(attendanceCallbackDispatcher);
-    await WorkmanagerUploadScheduler().ensureSweeper();
+    await scheduler.ensureSweeper();
   } catch (e) {
     debugPrint('Background sync setup failed: $e');
   }
@@ -70,12 +81,54 @@ Future<void> main() async {
     download: http.Client(),
     cacheDir: getTemporaryDirectory,
   );
-  final controller = AppController(
+
+  late final AppController controller;
+  final attendance = AttendanceRepository(
+    db: await openDeviceAttendanceDb(),
+    remote: SupabaseAttendanceRemote(client),
+    device: device,
+    scheduler: scheduler,
+    // The worker the app let in (eligible, Terms accepted); nobody otherwise.
+    currentWorkerId: () => switch (controller.state) {
+      Ready(:final worker) => worker.id,
+      _ => '',
+    },
+    photoDir: () async =>
+        Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}attendance-photos'),
+  );
+  controller = AppController(
     auth: AuthRepository(api: SignInApi(httpClient), backend: SupabaseAuthBackend(client, sessionStorage), cache: cache),
     terms: TermsRepository(backend: SupabaseTermsBackend(client), cache: cache, userAgent: userAgent),
     updates: updates,
     nudges: nudges.events,
   );
 
-  runApp(WorkMateApp(controller: controller, updates: updates, installer: ApkInstaller(), versionName: info.version));
+  final photos = AttendancePhotos.supabase(client);
+  final services = AttendanceServices(
+    attendance: attendance,
+    device: device,
+    scheduler: scheduler,
+    trustedNow: clockAnchors.now,
+    photoUrl: photos.signedUrl,
+    openSettings: (route) async {
+      try {
+        if (route == SettingsRoute.locationSwitch) {
+          await device.openLocationSettings();
+        } else {
+          await openAppSettings();
+        }
+      } catch (e) {
+        debugPrint('Could not open Settings: $e');
+      }
+    },
+  );
+
+  runApp(WorkMateApp(
+    controller: controller,
+    updates: updates,
+    installer: ApkInstaller(),
+    versionName: info.version,
+    attendance: services,
+    onResumed: syncHost.register,
+  ));
 }

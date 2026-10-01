@@ -12,6 +12,19 @@ Design and rules: `Dacs Web/docs/superpowers/specs/2026-09-29-unified-worker-app
 - Release APK: `flutter build apk --release` — ONE universal APK. Never split it per ABI: that rewrites
   versionCode per ABI and the server then refuses those phones.
 
+## Attendance (Stage 0C)
+
+Time In and Time Out live in WorkMate: the four-step flow (project, photo, check, describe), Home and History,
+with the same rules and words as DACS Attendance.
+
+- Camera and location permission are asked for together at the photo step. A refused location refuses the
+  Time In with an Open Settings button; Location switched off refuses it with a button to the phone's
+  Location switch.
+- Photos are taken in the app only (no gallery), front camera by default, filed mirrored as previewed, with
+  the project, date and time burned in.
+- A Time In made with no signal says "Not sent yet" and sends itself when signal returns, even after the app
+  is closed.
+
 ## Release rules
 
 - Bump `version:` in `pubspec.yaml` on EVERY release. The number after `+` is the versionCode:

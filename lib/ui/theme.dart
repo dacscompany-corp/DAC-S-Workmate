@@ -19,6 +19,18 @@ class WmColors {
   static const textMuted = Color(0xFF7A7A75);
   static const textMeta = Color(0xFF8A8A86);
   static const inert = Color(0xFFEDEDE8);
+
+  // Attendance (DACS Attendance ui/theme/Color.kt).
+  static const greenDeep = Color(0xFF12482D);
+  static const greenPressed = Color(0xFF134428);
+  static const greenBorder = Color(0xFFCBE0D2);
+  static const brownLight = Color(0xFF8A6A2F);
+  static const brownDeep = Color(0xFF6B4F22);
+  static const textDisabled = Color(0xFFA6A6A1);
+  static const textFaint = Color(0xFFC9C9C4);
+  static const vacant = Color(0xFFF0F0EB);
+  static const previewBackdrop = Color(0xFF131513);
+  static const viewerBackdrop = Color(0xFF0F110F);
 }
 
 ThemeData workMateTheme() => ThemeData(

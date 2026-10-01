@@ -39,6 +39,15 @@ void main() {
     expect(IsolateNameServer.lookupPortByName(syncPortName), isNull);
   });
 
+  test('registering again while still mapped keeps the same port', () async {
+    host = AttendanceSyncHost(drain: () async => true)..register();
+    final first = IsolateNameServer.lookupPortByName(syncPortName);
+    expect(first, isNotNull);
+    host!.register();
+    expect(IsolateNameServer.lookupPortByName(syncPortName), first);
+    expect(await delegateToLiveApp(), isTrue);
+  });
+
   test('concurrent delegations share one drain', () async {
     var calls = 0;
     final gate = Completer<bool>();

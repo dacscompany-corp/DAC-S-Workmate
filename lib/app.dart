@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_controller.dart';
+import 'attendance/attendance_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
 import 'ui/login_screen.dart';
@@ -18,12 +19,20 @@ class WorkMateApp extends StatefulWidget {
     required this.updates,
     required this.installer,
     required this.versionName,
+    required this.attendance,
+    this.onResumed,
   });
 
   final AppController controller;
   final AppUpdateRepository updates;
   final InstallGateway installer;
   final String versionName;
+
+  /// The attendance engine and its device services, for the signed-in app.
+  final AttendanceServices attendance;
+
+  /// Runs on every return to the app (main.dart re-registers the sync host).
+  final VoidCallback? onResumed;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -45,7 +54,10 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) widget.controller.checkForUpdate();
+    if (state == AppLifecycleState.resumed) {
+      widget.controller.checkForUpdate();
+      widget.onResumed?.call();
+    }
   }
 
   @override
@@ -70,7 +82,12 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
               SignedOut(:final notice) => LoginScreen(key: ValueKey(notice), initialNotice: notice, onSignIn: c.signIn),
               NeedsTerms() => TermsScreen(onAccept: c.acceptTerms),
               TermsUnavailable() => GateUnavailableScreen(onRetry: c.retryStartup, onSignOut: c.signOut),
-              Ready(:final worker) => HomeShell(worker: worker, versionName: widget.versionName, onSignOut: c.signOut),
+              Ready(:final worker) => HomeShell(
+                  worker: worker,
+                  versionName: widget.versionName,
+                  onSignOut: c.signOut,
+                  services: widget.attendance,
+                ),
             };
             final update = c.requiredUpdate;
             return Stack(children: [

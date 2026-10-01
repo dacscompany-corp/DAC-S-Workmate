@@ -20,6 +20,9 @@ class AttendanceSyncHost {
   Future<bool>? _inFlight;
 
   void register() {
+    final current = _port;
+    // Already registered and still mapped: re-registering would drop a request in flight.
+    if (current != null && IsolateNameServer.lookupPortByName(syncPortName) == current.sendPort) return;
     dispose();
     final port = ReceivePort();
     _port = port;

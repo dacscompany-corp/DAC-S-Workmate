@@ -15,6 +15,7 @@ import 'package:workmate/attendance/sync/upload_scheduler.dart';
 class FakeDevice implements DeviceBridge {
   bool online = false;
   String? lastCaption;
+  bool? lastMirror;
   @override
   Future<DeviceClockReading> clock() async => const DeviceClockReading(uptimeMillis: 0, bootCount: null);
   @override
@@ -22,12 +23,16 @@ class FakeDevice implements DeviceBridge {
   @override
   Future<DeviceFix> currentFix() async => const DeviceFix();
   @override
-  Future<String> preparePhoto({required String source, required String target, required String caption}) async {
+  Future<String> preparePhoto({required String source, required String target, required String caption, bool mirror = false}) async {
     lastCaption = caption;
+    lastMirror = mirror;
     await File(source).copy(target);
     await File(source).delete();
     return target;
   }
+
+  @override
+  Future<void> openLocationSettings() async {}
 }
 
 class FakeRemote implements AttendanceRemote {
@@ -235,5 +240,56 @@ void main() {
     expect((await repo.activeProjects()).single.id, 'p2');
     remote.projectsError = const SocketException('down');
     expect((await repo.activeProjects()).single.name, 'New Site');
+  });
+
+  test('a front-camera photo is filed mirrored, as the worker saw it', () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'), mirrorPhoto: true);
+    expect(device.lastMirror, isTrue);
+  });
+
+  test('a back-camera photo is filed as taken', () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    expect(device.lastMirror, isFalse);
+  });
+
+  test("refused submissions are this worker's failed rows only", () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    expect(await repo.refusedSubmissions(), isEmpty);
+    await db.markFailed('e1', 'outsideRadius');
+    final refused = await repo.refusedSubmissions();
+    expect(refused.single.eventId, 'e1');
+    expect(refused.single.lastError, 'outsideRadius');
+  });
+
+  test('dismissing a refused submission deletes the row and its photo', () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    final photo = (await db.sendable('w1')).single.photoLocalPath;
+    await db.markFailed('e1', 'outsideRadius');
+    await repo.dismissRefused('e1');
+    expect(await db.pendingById('e1'), isNull);
+    expect(File(photo).existsSync(), isFalse);
+  });
+
+  test('a row still owed to the server cannot be dismissed', () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    await repo.dismissRefused('e1');
+    expect(await db.pendingById('e1'), isNotNull);
+  });
+
+  test("another worker's refused row is neither listed nor dismissed", () async {
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    await db.markFailed('e1', 'outsideRadius');
+    final other = AttendanceRepository(
+      db: db,
+      remote: remote,
+      device: device,
+      scheduler: scheduler,
+      currentWorkerId: () => 'w2',
+      photoDir: () async => tmp,
+      now: () => now,
+    );
+    expect(await other.refusedSubmissions(), isEmpty);
+    await other.dismissRefused('e1');
+    expect(await db.pendingById('e1'), isNotNull);
   });
 }

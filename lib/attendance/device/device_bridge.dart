@@ -25,8 +25,13 @@ abstract class DeviceBridge {
   Future<DeviceFix> currentFix();
 
   /// Upright, scaled to 1600 px, caption burned in, JPEG 80 at [target];
-  /// deletes [source]. Returns [target].
-  Future<String> preparePhoto({required String source, required String target, required String caption});
+  /// deletes [source]. [mirror] flips a front-camera capture so the filed
+  /// photo matches the mirrored preview the worker approved. Returns [target].
+  Future<String> preparePhoto({required String source, required String target, required String caption, bool mirror = false});
+
+  /// Opens the phone-wide Location switch screen — NOT the app's permission
+  /// page: sending a worker to the wrong screen strands them.
+  Future<void> openLocationSettings();
 }
 
 double? _double(Object? v) => (v as num?)?.toDouble();
@@ -66,7 +71,15 @@ class MethodChannelDeviceBridge implements DeviceBridge {
   }
 
   @override
-  Future<String> preparePhoto({required String source, required String target, required String caption}) async =>
-      await _channel.invokeMethod<String>('preparePhoto', {'source': source, 'target': target, 'caption': caption}) ??
+  Future<String> preparePhoto({required String source, required String target, required String caption, bool mirror = false}) async =>
+      await _channel.invokeMethod<String>(
+        'preparePhoto',
+        {'source': source, 'target': target, 'caption': caption, 'mirror': mirror},
+      ) ??
       target;
+
+  @override
+  Future<void> openLocationSettings() async {
+    await _channel.invokeMethod<void>('openLocationSettings');
+  }
 }

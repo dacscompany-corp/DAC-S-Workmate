@@ -6,6 +6,7 @@ import '../domain/photo_overlay.dart';
 import '../domain/today_reconcile.dart';
 import '../domain/work_date.dart';
 import '../sync/upload_scheduler.dart';
+import 'attendance_api.dart';
 import 'attendance_db.dart';
 import 'attendance_remote.dart';
 import 'submission_request.dart';
@@ -13,7 +14,7 @@ import 'submission_request.dart';
 /// Offline-first attendance. The UI never waits on the network to confirm
 /// attendance: SUBMIT writes the photo, queues the row, updates the mirror and
 /// returns — all on the phone. The upload happens afterwards in the background.
-class AttendanceRepository {
+class AttendanceRepository implements AttendanceApi {
   AttendanceRepository({
     required this.db,
     required this.remote,
@@ -29,15 +30,17 @@ class AttendanceRepository {
   final DeviceBridge device;
   final UploadScheduler scheduler;
 
-  /// The signed-in worker (session id, else the last signed-in id; offline the
-  /// session can report nobody). Scope for EVERY local read and write.
+  /// The worker the app let in (signed in, eligible, Terms accepted: the Ready
+  /// state), or '' when nobody; never a guess from the session. Scope for EVERY
+  /// local read and write.
   final String Function() currentWorkerId;
 
   /// App-private directory for queued photos (never the gallery).
   final Future<Directory> Function() photoDir;
   final DateTime Function() _now;
 
-  Future<AttendanceRecord> submit(SubmissionRequest r) async {
+  @override
+  Future<AttendanceRecord> submit(SubmissionRequest r, {bool mirrorPhoto = false}) async {
     final workerId = currentWorkerId();
     // Nothing may be queued or mirrored under nobody.
     if (workerId.isEmpty) throw StateError('AUTH_REQUIRED');
@@ -57,6 +60,7 @@ class AttendanceRepository {
       source: r.photoPath,
       target: '${dir.path}${Platform.pathSeparator}${r.eventId}.jpg',
       caption: photoOverlayCaption(projectName, r.capturedAt),
+      mirror: mirrorPhoto,
     );
     // Decided HERE, at capture time — the upload happens later, with signal by definition.
     final queued = r.withPhoto(prepared, wasOffline: !await device.isOnline());
@@ -74,6 +78,7 @@ class AttendanceRepository {
 
   /// Today from the mirror; the network only CORRECTS it. Throws the network
   /// error only when there is genuinely nothing to show (Unknown).
+  @override
   Future<AttendanceRecord?> today() async {
     final workerId = currentWorkerId();
     final workDate = WorkDate.of(_now()).iso;
@@ -105,6 +110,7 @@ class AttendanceRepository {
 
   /// History, mirrored as it is fetched; served from the mirror offline. An
   /// empty mirror and an unreachable server are different answers.
+  @override
   Future<List<AttendanceRecord>> history(String from, String to) async {
     final workerId = currentWorkerId();
     try {
@@ -138,6 +144,7 @@ class AttendanceRepository {
   }
 
   /// Projects, cached per worker (a different worker may have a different owner).
+  @override
   Future<List<AttendanceProject>> activeProjects() async {
     final workerId = currentWorkerId();
     try {
@@ -148,6 +155,26 @@ class AttendanceRepository {
       final cached = await db.projects(workerId);
       if (cached.isNotEmpty) return cached;
       rethrow;
+    }
+  }
+
+  @override
+  Future<List<PendingSubmission>> refusedSubmissions() async {
+    final workerId = currentWorkerId();
+    if (workerId.isEmpty) return const [];
+    return db.failed(workerId);
+  }
+
+  @override
+  Future<void> dismissRefused(String eventId) async {
+    final row = await db.pendingById(eventId);
+    // Only this worker's own, and only a refused row: a sendable one is still owed to the server.
+    if (row == null || row.workerId != currentWorkerId() || !row.failedPermanently) return;
+    await db.deletePending(eventId);
+    try {
+      await File(row.photoLocalPath).delete();
+    } catch (_) {
+      // Already gone; the row was the thing that mattered.
     }
   }
 

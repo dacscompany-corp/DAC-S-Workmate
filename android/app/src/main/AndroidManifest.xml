@@ -4,6 +4,8 @@
     <!-- Attendance: one fix at Time In / Time Out, never tracking (Terms clause 4). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Attendance: the in-app photo that proves attendance (no gallery). -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- In-app updates: the office publishes APKs from Dacs Web (0079/0082). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
