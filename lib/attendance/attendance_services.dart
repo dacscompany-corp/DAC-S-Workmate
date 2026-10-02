@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'data/attendance_api.dart';
+import 'data/reward_remote.dart';
 import 'device/device_bridge.dart';
 import 'flow/camera_step.dart';
 import 'flow/time_flow_screen.dart';
@@ -19,6 +20,8 @@ class AttendanceServices {
     required this.trustedNow,
     required this.photoUrl,
     required this.openSettings,
+    this.rewards,
+    this.queueSettled,
     this.cameraStep = realCameraStep,
   });
 
@@ -34,6 +37,12 @@ class AttendanceServices {
 
   /// The app's permission page, or the phone's Location switch.
   final Future<void> Function(SettingsRoute route) openSettings;
+
+  /// The weekly reward reads; null in tests that do not need them.
+  final RewardApi? rewards;
+
+  /// Fires when the live app's background drain settled rows (main.dart).
+  final Listenable? queueSettled;
 
   final CameraStepBuilder cameraStep;
 }

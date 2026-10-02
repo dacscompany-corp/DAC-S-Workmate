@@ -27,4 +27,10 @@ void main() {
     expect(daysWorked(0), '0 days worked');
     expect(daysWorked(3), '3 days worked');
   });
+
+  test('pesos shows centavos only when they are real', () {
+    expect(pesos(500), '₱500');
+    expect(pesos(500.5), '₱500.50');
+    expect(pesos(1250.25), '₱1250.25');
+  });
 }

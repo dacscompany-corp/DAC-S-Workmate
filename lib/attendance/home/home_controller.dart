@@ -3,24 +3,33 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../data/attendance_api.dart';
+import '../data/reward_remote.dart';
 import '../data/submission_request.dart';
 import '../domain/attendance_failure.dart';
 import '../domain/attendance_record.dart';
 import '../domain/history.dart';
 import '../domain/total_hours.dart';
+import '../domain/weekly_reward.dart' hide rewardCells;
+import '../domain/weekly_reward.dart' as wr show rewardCells;
 import '../domain/work_date.dart';
 import '../sync/upload_scheduler.dart';
 
 /// Home's state. Ported from DACS Attendance's DashboardViewModel: today's
 /// record decides the one hero action.
 class HomeController extends ChangeNotifier {
-  HomeController({required AttendanceApi attendance, required UploadScheduler scheduler, DateTime Function()? now})
-      : _attendance = attendance,
+  HomeController({
+    required AttendanceApi attendance,
+    required UploadScheduler scheduler,
+    RewardApi? rewards,
+    DateTime Function()? now,
+  })  : _attendance = attendance,
         _scheduler = scheduler,
+        _rewards = rewards,
         now = now ?? DateTime.now;
 
   final AttendanceApi _attendance;
   final UploadScheduler _scheduler;
+  final RewardApi? _rewards;
 
   /// The clock the screen reads (fixed in tests).
   final DateTime Function() now;
@@ -30,12 +39,28 @@ class HomeController extends ChangeNotifier {
   AttendanceFailure? _failure;
   List<WeekDayCell> _week = const [];
   List<PendingSubmission> _refused = const [];
+  List<RewardCell> _rewardCells = const [];
+  RewardSummary? _reward;
+  bool _rewardUnavailable = false;
+  double? _rewardAmount;
   bool _disposed = false;
 
   bool get loading => _loading;
   AttendanceRecord? get record => _record;
   AttendanceFailure? get failure => _failure;
   List<PendingSubmission> get refused => _refused;
+
+  /// Monday to FRIDAY: five cells, where [week] has six (DACs works Saturdays,
+  /// the reward only asks about Mon-Fri). Empty until the server answered.
+  List<RewardCell> get rewardCells => _rewardCells;
+  RewardSummary? get reward => _reward;
+
+  /// The reward could not be read. Distinct from empty [rewardCells], which
+  /// only means "not read yet".
+  bool get rewardUnavailable => _rewardUnavailable;
+
+  /// The owner's reward, or null; shown only beside "Qualified".
+  double? get rewardAmount => _rewardAmount;
   bool get working => _record?.status == AttendanceStatus.working;
   bool get complete => _record?.status == AttendanceStatus.complete;
 
@@ -89,18 +114,21 @@ class HomeController extends ChangeNotifier {
     return formatMinutes(r.totalMinutes);
   }
 
-  Future<void> refresh() async {
+  /// [sendQueued] false when the refresh is BECAUSE a send just finished:
+  /// asking to send again would loop.
+  Future<void> refresh({bool sendQueued = true}) async {
     _loading = true;
     _failure = null;
     _notify();
     // Opening Home is the clearest sign a human is present and probably back
     // in coverage: queued records get a fresh attempt now.
-    unawaited(_quietly(_scheduler.sendNow));
+    if (sendQueued) unawaited(_quietly(_scheduler.sendNow));
     // Warm the project cache while there is signal; the picker reads it offline.
     unawaited(_quietly(_attendance.activeProjects));
     // Read separately so a failure here cannot take the hero button down.
     unawaited(_loadWeek());
     unawaited(_loadRefused());
+    unawaited(_loadReward());
     try {
       _record = await _attendance.today();
     } catch (e) {
@@ -142,6 +170,33 @@ class HomeController extends ChangeNotifier {
     } catch (_) {
       // Shown next time.
     }
+  }
+
+  Future<void> _loadReward() async {
+    final rewards = _rewards;
+    if (rewards == null) return;
+    final today = manilaDate(now());
+    final weekStart = rewardWeekStart(today);
+    unawaited(() async {
+      try {
+        _rewardAmount = await rewards.rewardAmount();
+        _notify();
+      } catch (_) {
+        // The pill reads "Qualified" without a figure.
+      }
+    }());
+    try {
+      final days = await rewards.weekProgress(weekStart);
+      _rewardCells = wr.rewardCells(weekStart, days, today);
+      _reward = rewardSummary(days, today);
+      _rewardUnavailable = false;
+    } catch (_) {
+      // No offline copy on purpose: five grey cells would read as five missed days.
+      _rewardCells = const [];
+      _reward = null;
+      _rewardUnavailable = true;
+    }
+    _notify();
   }
 
   static Future<void> _quietly(Future<void> Function() action) async {

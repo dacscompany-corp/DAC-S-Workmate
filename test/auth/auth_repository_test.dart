@@ -20,6 +20,14 @@ class FakeBackend implements AuthBackend {
   Object? adoptError;
   bool signedOut = false;
   String? adoptedRefresh;
+  final passwords = <String>[];
+  Object? passwordError;
+
+  @override
+  Future<void> changePassword(String newPassword) async {
+    if (passwordError != null) throw passwordError!;
+    passwords.add(newPassword);
+  }
 
   @override
   Future<void> adopt({required String accessToken, required String refreshToken}) async {
@@ -132,6 +140,21 @@ void main() {
     expect(cache.lastSignedInId, isNull);
     expect(cache.recall('u1'), isNull);
     expect(backend.signedOut, isTrue);
+  });
+
+  test('a password change goes to the signed-in session, unchanged', () async {
+    final backend = FakeBackend();
+    SharedPreferences.setMockInitialValues({});
+    final repo = AuthRepository(api: apiReturning(200, '{}'), backend: backend, cache: WorkerCache(await SharedPreferences.getInstance()));
+    await repo.changePassword('bagongpass1');
+    expect(backend.passwords, ['bagongpass1']);
+  });
+
+  test('a refused password change reaches the caller to be explained', () async {
+    final backend = FakeBackend()..passwordError = const SocketException('down');
+    SharedPreferences.setMockInitialValues({});
+    final repo = AuthRepository(api: apiReturning(200, '{}'), backend: backend, cache: WorkerCache(await SharedPreferences.getInstance()));
+    expect(() => repo.changePassword('bagongpass1'), throwsA(isA<SocketException>()));
   });
 }
 

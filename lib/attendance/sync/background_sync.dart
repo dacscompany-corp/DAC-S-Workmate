@@ -12,6 +12,8 @@ import '../../net/update_nudges.dart';
 import '../../net/workmate_http_client.dart';
 import '../data/attendance_db.dart';
 import '../data/attendance_remote.dart';
+import '../../widget/widget_bridge.dart';
+import '../../widget/widget_publisher.dart';
 import 'submission_sync.dart';
 import 'sync_host.dart';
 
@@ -52,12 +54,14 @@ Future<bool> runBackgroundSync() async {
     httpClient: WorkMateHttpClient(versionCode: int.parse(info.buildNumber), nudges: UpdateNudges()),
     localStorage: WorkMateSessionStorage(secure: SecureBox(), plain: prefs),
   );
-  return syncWith(client);
+  // No live app: this engine updates the widget itself (the plugin works here).
+  return syncWith(client, afterChange: WidgetPublisher(const ChannelWidgetBridge()).publish);
 }
 
 /// Refresh the session if needed, then drain this worker's queue. Shared by the
-/// background isolate and the live app's [AttendanceSyncHost].
-Future<bool> syncWith(SupabaseClient client) async {
+/// background isolate and the live app's [AttendanceSyncHost]. [afterChange]
+/// runs when the drain settled at least one row, with the drain's own database.
+Future<bool> syncWith(SupabaseClient client, {Future<void> Function(AttendanceDb db, String workerId)? afterChange}) async {
   // The stored session may be expired: join (or start) its refresh before sending.
   try {
     await client.auth.getSession().timeout(const Duration(seconds: 60));
@@ -74,7 +78,15 @@ Future<bool> syncWith(SupabaseClient client) async {
   // so closing one here would close another engine's database.
   final db = await openDeviceAttendanceDb(singleInstance: false);
   try {
-    final result = await SubmissionSync(db: db, remote: SupabaseAttendanceRemote(client)).drain(workerId);
+    final sync = SubmissionSync(db: db, remote: SupabaseAttendanceRemote(client));
+    final result = await sync.drain(workerId);
+    if (sync.settled > 0 && afterChange != null) {
+      try {
+        await afterChange(db, workerId);
+      } catch (_) {
+        // The rows are sent; telling the screens is best effort.
+      }
+    }
     return result == SyncResult.done;
   } finally {
     await db.close();

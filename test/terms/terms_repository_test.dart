@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +20,17 @@ class FakeTermsBackend implements TermsBackend {
   Future<Set<String>> acceptedVersions(String workerId) async {
     if (readError != null) throw readError!;
     return versions ?? {};
+  }
+
+  DateTime? acceptedAtValue;
+  Object? acceptedAtError;
+  int acceptedAtReads = 0;
+
+  @override
+  Future<DateTime?> acceptedAt(String workerId, String version) async {
+    acceptedAtReads++;
+    if (acceptedAtError != null) throw acceptedAtError!;
+    return acceptedAtValue;
   }
 
   @override
@@ -83,5 +96,29 @@ void main() {
     backend.acceptanceError = Exception('network');
     await expectLater(repo.accept(juan), throwsException);
     expect(cache.acceptedTermsVersion('u1'), isNull);
+  });
+
+  test('the accepted date comes from the server once, then from the phone', () async {
+    backend.acceptedAtValue = DateTime.utc(2026, 8, 2, 17);
+    expect(await repo.acceptedAt('u1'), DateTime.utc(2026, 8, 2, 17));
+    expect(await repo.acceptedAt('u1'), DateTime.utc(2026, 8, 2, 17));
+    expect(backend.acceptedAtReads, 1);
+  });
+
+  test('no signal and nothing remembered: no date, never an invented one', () async {
+    backend.acceptedAtError = const SocketException('down');
+    expect(await repo.acceptedAt('u1'), isNull);
+  });
+
+  test('no acceptance row: no date, and nothing cached', () async {
+    expect(await repo.acceptedAt('u1'), isNull);
+    expect(cache.termsAcceptedAt('u1', AttendanceTerms.version), isNull);
+  });
+
+  test('a date cached for an older Terms version is ignored and replaced', () async {
+    await cache.recordTermsAcceptedAt('u1', 'old-version', DateTime.utc(2026, 1, 1));
+    backend.acceptedAtValue = DateTime.utc(2026, 8, 2, 17);
+    expect(await repo.acceptedAt('u1'), DateTime.utc(2026, 8, 2, 17));
+    expect(backend.acceptedAtReads, 1);
   });
 }

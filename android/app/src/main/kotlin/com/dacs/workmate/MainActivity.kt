@@ -4,9 +4,11 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.dacs.workmate.widget.TimeWidgetProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,8 +16,34 @@ import java.io.File
 
 private const val APK_MIME = "application/vnd.android.package-archive"
 
-/** The installer channel for lib/update/apk_installer.dart. */
+/** The installer, attendance and widget-launch channels for the Dart side. */
 class MainActivity : FlutterActivity() {
+    /** The widget's "IN" / "OUT", held until Dart takes it (once). */
+    private var pendingStartFlow: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // A restore after the process died replays the ORIGINAL intent: that tap
+        // was already handled (or was hours ago), so only a fresh launch counts.
+        if (savedInstanceState == null) takeStartFlowFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takeStartFlowFrom(intent)
+    }
+
+    private fun takeStartFlowFrom(intent: Intent?) {
+        if (intent == null) return
+        // Reopened from Recents, Android hands back the intent that first
+        // started the task -- a widget tap from yesterday must not start today's flow.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        val raw = intent.getStringExtra(TimeWidgetProvider.EXTRA_START_FLOW)
+        intent.removeExtra(TimeWidgetProvider.EXTRA_START_FLOW)
+        if (!fromHistory && raw != null) pendingStartFlow = raw
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.dacs.workmate/installer")
@@ -48,6 +76,16 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.dacs.workmate/attendance")
             .setMethodCallHandler(AttendanceBridge(applicationContext))
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.dacs.workmate/launch")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "takeStartFlow") {
+                    result.success(pendingStartFlow)
+                    pendingStartFlow = null
+                } else {
+                    result.notImplemented()
+                }
+            }
     }
 
     private fun openInstallPermission() {

@@ -16,9 +16,11 @@ import 'attendance/data/attendance_db.dart';
 import 'attendance/data/attendance_photos.dart';
 import 'attendance/data/attendance_remote.dart';
 import 'attendance/data/attendance_repository.dart';
+import 'attendance/data/reward_remote.dart';
 import 'attendance/device/clock_anchor_store.dart';
 import 'attendance/device/device_bridge.dart';
 import 'attendance/sync/background_sync.dart';
+import 'attendance/sync/queue_settled.dart';
 import 'attendance/sync/sync_host.dart';
 import 'attendance/sync/upload_scheduler.dart';
 import 'attendance/ui/attendance_copy.dart';
@@ -30,9 +32,15 @@ import 'auth/worker_cache.dart';
 import 'net/supabase_setup.dart';
 import 'net/update_nudges.dart';
 import 'net/workmate_http_client.dart';
+import 'profile/account_services.dart';
 import 'terms/terms_repository.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
+import 'widget/start_flow.dart';
+import 'widget/widget_app_sync.dart';
+import 'widget/widget_aware_attendance.dart';
+import 'widget/widget_bridge.dart';
+import 'widget/widget_publisher.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,7 +68,18 @@ Future<void> main() async {
 
   // The live app is the one token refresher: background tasks delegate here.
   // Registered again on every resume (a slow answer can drop the mapping).
-  final syncHost = AttendanceSyncHost(drain: () => syncWith(client))..register();
+  // What it sends reaches the widget and Home at once.
+  final widgets = WidgetPublisher(const ChannelWidgetBridge());
+  // Who is let in right now; set once the repository exists (never read the
+  // late `controller` from here: a send handed over early would throw).
+  String Function() letInWorker = () => '';
+  final queueSettled = QueueSettled();
+  final syncHost = AttendanceSyncHost(
+    drain: () => syncWith(client, afterChange: (db, workerId) async {
+      await widgets.publishIfCurrent(db, workerId, () => letInWorker());
+      queueSettled.fire();
+    }),
+  )..register();
 
   // Background sending of queued Time Ins / Time Outs. The sweeper is the
   // backstop for a row whose enqueue never happened. The app must start even
@@ -96,20 +115,31 @@ Future<void> main() async {
     photoDir: () async =>
         Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}attendance-photos'),
   );
-  controller = AppController(
-    auth: AuthRepository(api: SignInApi(httpClient), backend: SupabaseAuthBackend(client, sessionStorage), cache: cache),
-    terms: TermsRepository(backend: SupabaseTermsBackend(client), cache: cache, userAgent: userAgent),
-    updates: updates,
-    nudges: nudges.events,
+  letInWorker = attendance.currentWorkerId;
+  final auth = AuthRepository(api: SignInApi(httpClient), backend: SupabaseAuthBackend(client, sessionStorage), cache: cache);
+  final terms = TermsRepository(backend: SupabaseTermsBackend(client), cache: cache, userAgent: userAgent);
+  controller = AppController(auth: auth, terms: terms, updates: updates, nudges: nudges.events);
+  // The home-screen widget follows every change to today, and every sign-in / sign-out.
+  Future<void> publishWidget() => widgets.publish(attendance.db, attendance.currentWorkerId());
+  final widgetSync = WidgetAppSync(publishWidget);
+  controller.addListener(() => widgetSync.onAppState(controller.state));
+  final account = AccountServices(
+    changePassword: auth.changePassword,
+    termsAcceptedAt: () async => switch (controller.state) {
+      Ready(:final worker) => terms.acceptedAt(worker.id),
+      _ => null,
+    },
   );
 
   final photos = AttendancePhotos.supabase(client);
   final services = AttendanceServices(
-    attendance: attendance,
+    attendance: WidgetAwareAttendance(attendance, onTodayChanged: publishWidget),
     device: device,
     scheduler: scheduler,
     trustedNow: clockAnchors.now,
     photoUrl: photos.signedUrl,
+    rewards: SupabaseRewardRemote(client),
+    queueSettled: queueSettled,
     openSettings: (route) async {
       try {
         if (route == SettingsRoute.locationSwitch) {
@@ -129,6 +159,8 @@ Future<void> main() async {
     installer: ApkInstaller(),
     versionName: info.version,
     attendance: services,
+    account: account,
     onResumed: syncHost.register,
+    launches: const ChannelLaunchRequests(),
   ));
 }

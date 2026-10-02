@@ -56,6 +56,11 @@ class AuthRepository {
     await backend.signOut();
   }
 
+  /// The rules (length, the second box) are checked on the phone first
+  /// (PasswordChangeFailure.validate); this only asks the server. Failures
+  /// are thrown for PasswordChangeFailure.of to explain.
+  Future<void> changePassword(String newPassword) => backend.changePassword(newPassword);
+
   /// Who is signed in: the server's answer when it can be asked as the
   /// worker, otherwise the last profile this device saw, otherwise nobody.
   Future<WorkerProfile?> currentWorker() async {

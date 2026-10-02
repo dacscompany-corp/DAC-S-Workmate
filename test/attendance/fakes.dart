@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:workmate/attendance/data/attendance_api.dart';
+import 'package:workmate/attendance/data/reward_remote.dart';
 import 'package:workmate/attendance/data/submission_request.dart';
 import 'package:workmate/attendance/device/device_bridge.dart';
 import 'package:workmate/attendance/domain/attendance_record.dart';
 import 'package:workmate/attendance/domain/location_verification.dart';
+import 'package:workmate/attendance/domain/weekly_reward.dart';
 import 'package:workmate/attendance/domain/work_date.dart';
 import 'package:workmate/attendance/sync/upload_scheduler.dart';
 
@@ -171,4 +173,26 @@ void useTallPhone(WidgetTester tester) {
   tester.view.physicalSize = const Size(1200, 3000);
   tester.view.devicePixelRatio = 3.0;
   addTearDown(tester.view.reset);
+}
+
+/// A RewardApi whose answers the test sets.
+class FakeRewards implements RewardApi {
+  List<RewardDay> days = [];
+  Object? error;
+  double? amount;
+  Object? amountError;
+  final weekStarts = <DateTime>[];
+
+  @override
+  Future<List<RewardDay>> weekProgress(DateTime weekStart) async {
+    weekStarts.add(weekStart);
+    if (error != null) throw error!;
+    return days;
+  }
+
+  @override
+  Future<double?> rewardAmount() async {
+    if (amountError != null) throw amountError!;
+    return amount;
+  }
 }

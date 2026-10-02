@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  4x3 by default, resizable (DACS Attendance's proportions). Under 138dp the
+  subtitle drops; under 100dp the card becomes one row (WidgetRules.kt).
+
+  updatePeriodMillis is only the BACKSTOP: the app pushes on every change.
+  This is what rolls yesterday's "Complete" over to "Time In" after Manila
+  midnight on a phone where nothing else runs.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_full"
+    android:minWidth="250dp"
+    android:minHeight="150dp"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="48dp"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="4"
+    android:targetCellHeight="3"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_controller.dart';
 import '../attendance/attendance_services.dart';
 import '../attendance/domain/work_date.dart';
 import '../attendance/flow/time_flow_controller.dart';
@@ -10,8 +11,9 @@ import '../attendance/home/home_controller.dart';
 import '../attendance/home/home_screen.dart';
 import '../attendance/ui/attendance_copy.dart';
 import '../auth/worker_profile.dart';
-import 'theme.dart';
-import 'worker_header.dart';
+import '../profile/account_services.dart';
+import '../profile/profile_screen.dart';
+import '../widget/start_flow.dart';
 
 /// The signed-in app: Home, History and Profile, and the four-step Time In /
 /// Time Out flow launched from Home. The flow is MODAL (no tabs while
@@ -23,12 +25,18 @@ class HomeShell extends StatefulWidget {
     required this.versionName,
     required this.onSignOut,
     required this.services,
+    required this.account,
+    this.startRequests,
   });
 
   final WorkerProfile worker;
   final String versionName;
   final Future<void> Function() onSignOut;
   final AttendanceServices services;
+  final AccountServices account;
+
+  /// Widget taps waiting for Home to decide them.
+  final StartFlowInbox? startRequests;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -45,15 +53,60 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     final s = widget.services;
-    _home = HomeController(attendance: s.attendance, scheduler: s.scheduler);
+    _home = HomeController(attendance: s.attendance, scheduler: s.scheduler, rewards: s.rewards);
     _history = HistoryController(attendance: s.attendance);
     WidgetsBinding.instance.addObserver(this);
     _home.refresh();
+    s.queueSettled?.addListener(_onQueueSettled);
+    widget.startRequests?.addListener(_consumeStart);
+    _home.addListener(_consumeStart);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _consumeStart());
+  }
+
+  void _consumeStart() {
+    final inbox = widget.startRequests;
+    final request = inbox?.pending;
+    if (inbox == null || request == null || !mounted) return;
+    final decision = resolveStartFlow(
+      request,
+      Ready(widget.worker),
+      flowOpen: _flow != null,
+      home: (loading: _home.loading, nextAction: _home.nextAction),
+    );
+    switch (decision) {
+      case StartFlowDecision.wait:
+        return;
+      case StartFlowDecision.drop:
+        inbox.clear();
+      case StartFlowDecision.stayOnHome:
+        inbox.clear();
+        _showHome();
+      case StartFlowDecision.open:
+        inbox.clear();
+        _showHome();
+        _startFlow(request);
+    }
+  }
+
+  /// Back to Home from wherever the worker left the app: a tab, the Terms
+  /// reader, the password sheet.
+  void _showHome() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (_tab != 0) setState(() => _tab = 0);
+  }
+
+  void _onQueueSettled() {
+    // Not while recording: the flow owns the screen, and _endFlow refreshes anyway.
+    if (_flow == null) _home.refresh(sendQueued: false);
+    if (_tab == 1) _history.refresh();
   }
 
   @override
   void dispose() {
+    widget.services.queueSettled?.removeListener(_onQueueSettled);
     WidgetsBinding.instance.removeObserver(this);
+    widget.startRequests?.removeListener(_consumeStart);
+    _home.removeListener(_consumeStart);
     _flow?.abandon();
     _flow?.dispose();
     _home.dispose();
@@ -128,7 +181,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           onDismissExit: () => setState(() => _exitNotice = null),
         ),
       1 => HistoryScreen(controller: _history, photoUrl: s.photoUrl),
-      _ => _ProfileTab(worker: widget.worker, versionName: widget.versionName, onSignOut: widget.onSignOut),
+      _ => ProfileScreen(worker: widget.worker, versionName: widget.versionName, onSignOut: widget.onSignOut, account: widget.account),
     };
     return Scaffold(
       body: SafeArea(child: body),
@@ -143,24 +196,4 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ),
     );
   }
-}
-
-/// 0B's profile, unchanged; password change and the rest arrive in 0D.
-class _ProfileTab extends StatelessWidget {
-  const _ProfileTab({required this.worker, required this.versionName, required this.onSignOut});
-  final WorkerProfile worker;
-  final String versionName;
-  final Future<void> Function() onSignOut;
-
-  @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('Profile', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 23)),
-        const SizedBox(height: 16),
-        WorkerHeader(worker: worker),
-        const SizedBox(height: 24),
-        OutlinedButton.icon(onPressed: onSignOut, icon: const Icon(Icons.logout), label: const Text('Log out')),
-        const SizedBox(height: 16),
-        Text("DAC'S WorkMate $versionName · By Dacs Building Design Services",
-            style: const TextStyle(fontSize: 12.5, color: WmColors.textMeta)),
-      ]);
 }

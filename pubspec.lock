@@ -1093,6 +1093,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.0"
+  workmate_widget_bridge:
+    dependency: "direct main"
+    description:
+      path: "packages/workmate_widget_bridge"
+      relative: true
+    source: path
+    version: "1.0.0"
   xdg_directories:
     dependency: transitive
     description:

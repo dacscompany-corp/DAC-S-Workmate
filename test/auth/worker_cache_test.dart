@@ -30,4 +30,19 @@ void main() {
     expect(cache.recall('u1'), isNull);
     expect(cache.acceptedTermsVersion('u1'), isNull);
   });
+
+  test('remembers when the Terms were accepted, and forgets it at sign-out', () async {
+    final cache = WorkerCache(await SharedPreferences.getInstance());
+    final at = DateTime.utc(2026, 8, 2, 17);
+    await cache.recordTermsAcceptedAt('u1', 'v1', at);
+    expect(cache.termsAcceptedAt('u1', 'v1'), at);
+    await cache.forget('u1');
+    expect(cache.termsAcceptedAt('u1', 'v1'), isNull);
+  });
+
+  test('a Terms date remembered for one version is not shown for another', () async {
+    final cache = WorkerCache(await SharedPreferences.getInstance());
+    await cache.recordTermsAcceptedAt('u1', 'v1', DateTime.utc(2026, 8, 2, 17));
+    expect(cache.termsAcceptedAt('u1', 'v2'), isNull);
+  });
 }

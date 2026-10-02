@@ -1,9 +1,26 @@
 import 'package:flutter/material.dart';
 
+import '../attendance/ui/formats.dart';
 import '../auth/login_failure.dart';
 import '../terms/attendance_terms.dart';
 import 'failure_notice.dart';
 import 'theme.dart';
+
+/// The numbered clauses, English then Tagalog. One list for the first-login
+/// screen and the read-only copy on Profile, so the two can never differ.
+List<Widget> termsClauseWidgets() => [
+      for (var i = 0; i < AttendanceTerms.clauses.length; i++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${i + 1}. ${AttendanceTerms.clauses[i].heading}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 4),
+            Text(AttendanceTerms.clauses[i].english, style: const TextStyle(fontSize: 14.5, height: 1.4)),
+            const SizedBox(height: 4),
+            Text(AttendanceTerms.clauses[i].tagalog, style: const TextStyle(fontSize: 13.5, height: 1.4, color: WmColors.textMuted)),
+          ]),
+        ),
+    ];
 
 class TermsScreen extends StatefulWidget {
   const TermsScreen({super.key, required this.onAccept});
@@ -41,19 +58,7 @@ class _TermsScreenState extends State<TermsScreen> {
                 const Text('You only need to do this once, on your first log in.',
                     style: TextStyle(fontSize: 15, color: WmColors.textMuted)),
                 const SizedBox(height: 16),
-                for (var i = 0; i < AttendanceTerms.clauses.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${i + 1}. ${AttendanceTerms.clauses[i].heading}',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                      const SizedBox(height: 4),
-                      Text(AttendanceTerms.clauses[i].english, style: const TextStyle(fontSize: 14.5, height: 1.4)),
-                      const SizedBox(height: 4),
-                      Text(AttendanceTerms.clauses[i].tagalog,
-                          style: const TextStyle(fontSize: 13.5, height: 1.4, color: WmColors.textMuted)),
-                    ]),
-                  ),
+                ...termsClauseWidgets(),
               ]),
             ),
             Padding(
@@ -83,4 +88,25 @@ class _TermsScreenState extends State<TermsScreen> {
           ]),
         ),
       );
+}
+
+/// The Terms the worker accepted, read-only, from Profile.
+class TermsReaderScreen extends StatelessWidget {
+  const TermsReaderScreen({super.key, this.acceptedAt});
+  final DateTime? acceptedAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final at = acceptedAt;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Terms & Conditions', style: TextStyle(fontWeight: FontWeight.w800))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
+        if (at != null) ...[
+          Text('Accepted ${shortDate(at)}', style: const TextStyle(fontSize: 14, color: WmColors.textMuted)),
+          const SizedBox(height: 14),
+        ],
+        ...termsClauseWidgets(),
+      ]),
+    );
+  }
 }

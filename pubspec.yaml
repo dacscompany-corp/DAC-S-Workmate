@@ -1,7 +1,7 @@
 name: workmate
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.2.0+1002
+version: 0.3.0+1003
 
 environment:
   sdk: ^3.10.8
@@ -21,6 +21,9 @@ dependencies:
   sqflite: 2.4.2+1
   supabase_flutter: 2.17.2
   workmanager: 0.10.10
+  # The home-screen widget's push, usable from WorkManager's engine too (0D).
+  workmate_widget_bridge:
+    path: packages/workmate_widget_bridge
 
 dev_dependencies:
   flutter_test:

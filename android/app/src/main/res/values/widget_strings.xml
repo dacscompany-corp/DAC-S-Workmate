@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widget's words. English, like every screen label.
+     From DACS Attendance strings.xml; the signed-out title names this app. -->
+<resources>
+    <string name="widget_label">Time In / Out</string>
+    <string name="widget_description">Today\'s status, and Time In or Time Out in one tap.</string>
+    <string name="widget_done_no_times">Done for today</string>
+
+    <string name="widget_pill_step_one">STEP 1 OF 4</string>
+    <string name="widget_pill_on_site">ON SITE</string>
+    <string name="widget_pill_all_done">ALL DONE</string>
+    <string name="widget_pill_no_time_out">NO TIME OUT</string>
+    <string name="widget_pill_sign_in">SIGN IN</string>
+    <string name="widget_pill_queued">QUEUED · WILL UPLOAD</string>
+
+    <string name="widget_card_time_in">Time In</string>
+    <string name="widget_card_time_out">Time Out</string>
+    <string name="widget_card_complete">Complete</string>
+    <string name="widget_card_day_closed">Day closed</string>
+    <string name="widget_card_open_app">Open the app</string>
+    <string name="widget_card_sign_in">DAC\'S WorkMate</string>
+
+    <string name="widget_sub_start_day">Tap to start your day</string>
+    <string name="widget_sub_close_day">Tap to close out your day</string>
+    <string name="widget_sub_sort_out">Open the app to sort today out</string>
+    <string name="widget_sub_unavailable">Today\'s status isn\'t available here</string>
+    <string name="widget_sub_sign_in">Sign in to time in</string>
+    <string name="widget_sub_day_span">%1$s – %2$s</string>
+
+    <string name="widget_flow_in">project · photo · check · submit</string>
+    <string name="widget_flow_out">photo · check · submit</string>
+</resources>

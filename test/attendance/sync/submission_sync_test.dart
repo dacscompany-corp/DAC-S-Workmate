@@ -138,4 +138,18 @@ void main() {
     expect(await sync.drain(''), SyncResult.done);
     expect(remote.sent, isEmpty);
   });
+
+  test('settled counts every row the drain finished with', () async {
+    await queue('e1', TimeDirection.timeIn, '2026-08-18T23:45:00Z');
+    await queue('e2', TimeDirection.timeOut, '2026-08-19T09:30:00Z');
+    expect(await sync.drain('w1'), SyncResult.done);
+    expect(sync.settled, 2);
+  });
+
+  test('a drain stopped by no signal settled nothing', () async {
+    await queue('e1', TimeDirection.timeIn, '2026-08-18T23:45:00Z');
+    remote.failures['e1'] = const SocketException('down');
+    expect(await sync.drain('w1'), SyncResult.retry);
+    expect(sync.settled, 0);
+  });
 }

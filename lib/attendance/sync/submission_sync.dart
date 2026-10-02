@@ -27,7 +27,12 @@ class SubmissionSync {
   final AttendanceDb db;
   final AttendanceRemote remote;
 
+  /// Rows the last [drain] finished with: sent, dropped for the server's
+  /// version, or refused for good. Zero means nothing on the phone changed.
+  int settled = 0;
+
   Future<SyncResult> drain(String workerId) async {
+    settled = 0;
     // With no session nothing may be sent: the RPC would file it under whoever signs in next.
     if (workerId.isEmpty) return SyncResult.done;
     for (var i = 0; i < _maxPerRun; i++) {
@@ -36,6 +41,7 @@ class SubmissionSync {
       if (next == null) return SyncResult.done;
       final row = queue.firstWhere((p) => p.eventId == next.eventId);
       if (await _send(row, workerId) == SyncResult.retry) return SyncResult.retry;
+      settled++;
     }
     return SyncResult.done;
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'app_controller.dart';
 import 'attendance/attendance_services.dart';
+import 'profile/account_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
 import 'ui/login_screen.dart';
@@ -11,6 +12,7 @@ import 'ui/theme.dart';
 import 'ui/update_overlay.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
+import 'widget/start_flow.dart';
 
 class WorkMateApp extends StatefulWidget {
   const WorkMateApp({
@@ -20,7 +22,9 @@ class WorkMateApp extends StatefulWidget {
     required this.installer,
     required this.versionName,
     required this.attendance,
+    required this.account,
     this.onResumed,
+    this.launches,
   });
 
   final AppController controller;
@@ -31,24 +35,36 @@ class WorkMateApp extends StatefulWidget {
   /// The attendance engine and its device services, for the signed-in app.
   final AttendanceServices attendance;
 
+  /// Password change and the Terms date, for Profile.
+  final AccountServices account;
+
   /// Runs on every return to the app (main.dart re-registers the sync host).
   final VoidCallback? onResumed;
+
+  /// Widget taps MainActivity received; null in tests.
+  final LaunchRequests? launches;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
 }
 
 class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
+  final _inbox = StartFlowInbox();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_gateStartFlow);
     widget.controller.start();
+    _takeLaunch();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.controller.removeListener(_gateStartFlow);
+    _inbox.dispose();
     super.dispose();
   }
 
@@ -57,7 +73,24 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       widget.controller.checkForUpdate();
       widget.onResumed?.call();
+      _takeLaunch();
     }
+  }
+
+  Future<void> _takeLaunch() async {
+    final request = await widget.launches?.take();
+    if (request == null || !mounted) return;
+    _inbox.put(request);
+    _gateStartFlow();
+  }
+
+  /// The app-level half of resolveStartFlow: a tap that arrives at the login or
+  /// Terms screen is dropped; one that arrives while starting up waits; Home
+  /// decides the rest.
+  void _gateStartFlow() {
+    final request = _inbox.pending;
+    if (request == null) return;
+    if (resolveStartFlow(request, widget.controller.state, flowOpen: false) == StartFlowDecision.drop) _inbox.clear();
   }
 
   @override
@@ -87,6 +120,8 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   versionName: widget.versionName,
                   onSignOut: c.signOut,
                   services: widget.attendance,
+                  account: widget.account,
+                  startRequests: _inbox,
                 ),
             };
             final update = c.requiredUpdate;

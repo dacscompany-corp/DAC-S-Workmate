@@ -19,6 +19,10 @@ abstract class AuthBackend {
   /// asked (no session, no signal); returns null only for "no such row".
   Future<Map<String, dynamic>?> readProfile(String userId);
 
+  /// Changes THIS session's password. Only ever the worker signed in on this
+  /// phone: there is no way to name anyone else.
+  Future<void> changePassword(String newPassword);
+
   Future<void> signOut();
 }
 
@@ -70,6 +74,13 @@ class SupabaseAuthBackend implements AuthBackend {
     // answer "no rows" -- a lie that looks like a missing worker.
     if (_client.auth.currentSession == null) throw StateError('No session to read the profile with');
     return _client.from('profiles').select(WorkerProfile.columns).eq('id', userId).maybeSingle().timeout(const Duration(seconds: 15));
+  }
+
+  @override
+  Future<void> changePassword(String newPassword) async {
+    // Without a session gotrue would fail with a message that reads as a password problem.
+    if (_client.auth.currentSession == null) throw StateError('No session to change the password with');
+    await _client.auth.updateUser(UserAttributes(password: newPassword)).timeout(const Duration(seconds: 20));
   }
 
   @override

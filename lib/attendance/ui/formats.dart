@@ -45,3 +45,6 @@ String dayHeading(DateTime calendarDate) =>
 
 /// "1 day worked" / "3 days worked".
 String daysWorked(int n) => n == 1 ? '1 day worked' : '$n days worked';
+
+/// "₱500", and "₱500.50" only when the centavos are real.
+String pesos(double amount) => amount % 1 == 0 ? '₱${amount.toInt()}' : '₱${amount.toStringAsFixed(2)}';

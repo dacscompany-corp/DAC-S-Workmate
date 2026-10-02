@@ -36,6 +36,8 @@ class FakeAuth implements AuthBackend {
   @override
   Future<Map<String, dynamic>?> readProfile(String userId) async => row;
   @override
+  Future<void> changePassword(String newPassword) async {}
+  @override
   Future<void> signOut() async {
     await signOutGate;
     if (signOutThrows) throw StateError('network');
@@ -51,6 +53,8 @@ class FakeTerms implements TermsBackend {
     if (offline) throw const SocketException('down');
     return versions!;
   }
+  @override
+  Future<DateTime?> acceptedAt(String workerId, String version) async => null;
   @override
   Future<void> insertEvidence(Map<String, dynamic> row) async {}
   @override

@@ -8,7 +8,9 @@ import '../../ui/theme.dart';
 import '../../ui/worker_header.dart';
 import '../domain/attendance_failure.dart';
 import '../domain/attendance_record.dart';
+import '../domain/greeting.dart';
 import '../domain/history.dart';
+import '../domain/weekly_reward.dart';
 import '../domain/work_date.dart';
 import '../ui/attendance_copy.dart';
 import '../ui/attendance_failure_notice.dart';
@@ -17,7 +19,7 @@ import '../ui/status_pill.dart';
 import 'home_controller.dart';
 
 /// Home: today's record and the one thing to do next. Ported from DACS
-/// Attendance's DashboardScreen (the weekly reward strip arrives in 0D).
+/// Attendance's DashboardScreen, weekly reward strip included.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
@@ -75,6 +77,10 @@ class _HomeScreenState extends State<HomeScreen> {
             child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
               WorkerHeader(worker: widget.worker),
               const SizedBox(height: 18),
+              Text('${greetingAt(now).text}, ${widget.worker.firstName}',
+                  key: const Key('greeting'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: WmColors.green)),
+              const SizedBox(height: 4),
               Text(weekdayName(now).toUpperCase(),
                   style: const TextStyle(fontSize: 12.5, letterSpacing: 0.6, color: WmColors.textMuted, fontWeight: FontWeight.w600)),
               Text(longDate(now), style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
@@ -102,6 +108,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ..._today(c, failure),
               const SizedBox(height: 20),
               _WeekStrip(cells: c.week, onSeeAll: widget.onSeeHistory),
+              const SizedBox(height: 20),
+              _RewardStrip(controller: c),
             ]),
           );
         },
@@ -351,4 +359,112 @@ class _WeekCell extends StatelessWidget {
           ),
         ]),
       );
+}
+
+/// The unverified line (0078): the one outcome a worker can PREVENT next
+/// time, so it says how rather than only that it happened.
+const rewardUnverifiedNote =
+    'A brown day could not be verified and does not count. Time In at the site, and open the app once with signal after restarting your phone.';
+
+/// The Monday-to-Friday reward. Renders nothing until the server answered:
+/// the reward is the one read here with no offline copy, and five grey cells
+/// shown for "not read yet" would read as five missed days.
+class _RewardStrip extends StatelessWidget {
+  const _RewardStrip({required this.controller});
+  final HomeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final cells = c.rewardCells;
+    final unavailable = c.rewardUnavailable;
+    if (cells.isEmpty && !unavailable) return const SizedBox.shrink();
+    final summary = c.reward;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // The label gives way (and may wrap) so the status always sits at the right edge.
+      Row(children: [
+        const Expanded(child: Text('WEEKLY REWARD', style: monoLabel)),
+        const SizedBox(width: 12),
+        if (unavailable)
+          const Text('Needs signal to check',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: WmColors.textMuted))
+        else if (summary != null)
+          _rewardPill(summary, c.rewardAmount),
+      ]),
+      if (!unavailable) ...[
+        const SizedBox(height: 9),
+        Row(children: [for (final cell in cells) Expanded(child: _RewardCellView(cell: cell))]),
+        if (summary != null) ...[
+          const SizedBox(height: 9),
+          Text('${summary.onTimeDays} of ${summary.requiredDays} on time',
+              style: const TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+          if (summary.unverifiedDays > 0) ...[
+            const SizedBox(height: 4),
+            const Text(rewardUnverifiedNote, style: TextStyle(fontSize: 12.5, color: WmColors.brown)),
+          ],
+        ],
+      ],
+    ]);
+  }
+
+  /// The amount appears only BESIDE "Qualified", and only when the office set
+  /// one: a peso figure next to "Disqualified" reads as a promise.
+  static Widget _rewardPill(RewardSummary s, double? amount) => switch (s.status) {
+        RewardStatus.qualified => StatusPill.green(amount == null ? 'Qualified' : 'Qualified · ${pesos(amount)}'),
+        RewardStatus.disqualified =>
+          const StatusPill('Disqualified', background: WmColors.dangerTint, foreground: WmColors.danger),
+        RewardStatus.inProgress => const StatusPill.brown('In progress'),
+      };
+}
+
+class _RewardCellView extends StatelessWidget {
+  const _RewardCellView({required this.cell});
+  final RewardCell cell;
+
+  @override
+  Widget build(BuildContext context) {
+    // Pending and not-required are the QUIETEST states: one has not happened
+    // yet, the other is a day the company chose not to open. Red would blame
+    // a worker for the calendar. Unverified is brown: the worker WAS there.
+    final (dot, border, fill) = switch (cell.state) {
+      RewardCellState.onTime => (WmColors.green, WmColors.border, Colors.white),
+      RewardCellState.late => (WmColors.danger, WmColors.dangerBorder, WmColors.dangerTint),
+      RewardCellState.missing => (WmColors.danger, WmColors.dangerBorder, WmColors.dangerTint),
+      RewardCellState.unverified => (WmColors.brown, WmColors.brown, WmColors.brownTint),
+      RewardCellState.pending => (WmColors.border, WmColors.border, Colors.white),
+      RewardCellState.notRequired => (WmColors.vacant, WmColors.hairline, WmColors.canvas),
+    };
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: cell.isToday ? WmColors.greenTint : fill,
+        border: Border.all(color: cell.isToday ? WmColors.green : border, width: cell.isToday ? 1.5 : 1),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(children: [
+        Text(
+          cell.label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: cell.isToday ? FontWeight.w800 : FontWeight.w600,
+            color: cell.isToday
+                ? WmColors.green
+                : switch (cell.state) {
+                    RewardCellState.pending => WmColors.textDisabled,
+                    RewardCellState.notRequired => WmColors.textFaint,
+                    _ => WmColors.textMuted,
+                  },
+          ),
+        ),
+        const SizedBox(height: 5),
+        Container(
+          key: Key('reward-dot-${isoDate(cell.date)}-${cell.state.name}'),
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: dot),
+        ),
+      ]),
+    );
+  }
 }

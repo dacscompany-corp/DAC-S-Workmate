@@ -116,4 +116,14 @@ void main() {
     expect(attendance.dismissed, ['e9']);
     expect(c.refused, isEmpty);
   });
+
+  test('a refresh after a background send does not ask to send again', () async {
+    final c = home();
+    await c.refresh(sendQueued: false);
+    await settle();
+    expect(scheduler.sendNows, 0);
+    await c.refresh();
+    await settle();
+    expect(scheduler.sendNows, 1);
+  });
 }
