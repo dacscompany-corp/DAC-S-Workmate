@@ -48,3 +48,6 @@ app.*.map.json
 android/keystore.properties
 *.jks
 *.keystore
+
+# Gradle cache of the in-repo widget plugin (built by the app build).
+packages/*/android/.gradle/
