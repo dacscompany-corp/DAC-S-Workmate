@@ -30,7 +30,8 @@ object PhotoPreparer {
         val upright = if (mirror) mirrored(decoded) else decoded
         val scaled = scaleToBudget(upright)
         if (scaled !== upright) upright.recycle()
-        drawCaption(scaled, caption)
+        // An empty caption (a request photo, 1a-3) leaves the image clean: no band.
+        if (caption.isNotEmpty()) drawCaption(scaled, caption)
         target.parentFile?.mkdirs()
         try {
             target.outputStream().use { out ->

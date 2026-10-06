@@ -18,6 +18,7 @@ class AttendanceSyncHost {
   final Future<bool> Function() _drain;
   ReceivePort? _port;
   Future<bool>? _inFlight;
+  bool _again = false;
 
   void register() {
     final current = _port;
@@ -35,13 +36,34 @@ class AttendanceSyncHost {
     });
   }
 
+  /// A drain right now, from this isolate (a request was just queued): it
+  /// shares the one in flight, if any.
+  Future<bool> drainNow() => _run();
+
   /// Concurrent requests share ONE drain: never two at once in this isolate.
+  /// A call that arrives DURING a drain may be about a row queued after that
+  /// drain read its queue (a Time In while requests upload), so the drain
+  /// runs once more afterwards and every caller gets the LAST run's result.
+  /// It converges: only outside callers ask for a re-run (the drain's own
+  /// notices refresh screens without sending), so it stops when they stop.
   Future<bool> _run() {
-    return _inFlight ??= () async {
+    final running = _inFlight;
+    if (running != null) {
+      _again = true;
+      return running;
+    }
+    return _inFlight = () async {
       try {
-        return await _drain();
-      } catch (_) {
-        return false;
+        var result = false;
+        do {
+          _again = false;
+          try {
+            result = await _drain();
+          } catch (_) {
+            result = false;
+          }
+        } while (_again);
+        return result;
       } finally {
         _inFlight = null;
       }

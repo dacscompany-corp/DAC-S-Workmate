@@ -30,6 +30,7 @@ class HomeScreen extends StatefulWidget {
     required this.openSettings,
     this.exitNotice,
     this.onDismissExit,
+    this.requestUpdates,
   });
 
   final WorkerProfile worker;
@@ -41,6 +42,10 @@ class HomeScreen extends StatefulWidget {
   /// Why the last flow recorded nothing (a declined camera), until dismissed.
   final Bilingual? exitNotice;
   final VoidCallback? onDismissExit;
+
+  /// The Requests card (lib/requests/home), below today; null when the app
+  /// has no Requests tab.
+  final Widget? requestUpdates;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -106,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
               ],
               ..._today(c, failure),
+              ?widget.requestUpdates,
               const SizedBox(height: 20),
               _WeekStrip(cells: c.week, onSeeAll: widget.onSeeHistory),
               const SizedBox(height: 20),

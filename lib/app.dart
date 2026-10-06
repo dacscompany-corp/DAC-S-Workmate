@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'app_controller.dart';
 import 'attendance/attendance_services.dart';
 import 'profile/account_services.dart';
+import 'requests/requests_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
 import 'ui/login_screen.dart';
@@ -25,6 +26,7 @@ class WorkMateApp extends StatefulWidget {
     required this.account,
     this.onResumed,
     this.launches,
+    this.requests,
   });
 
   final AppController controller;
@@ -43,6 +45,9 @@ class WorkMateApp extends StatefulWidget {
 
   /// Widget taps MainActivity received; null in tests.
   final LaunchRequests? launches;
+
+  /// The Requests tab (Stage 1a); null in tests that do not need it.
+  final RequestsServices? requests;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -122,6 +127,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   services: widget.attendance,
                   account: widget.account,
                   startRequests: _inbox,
+                  requests: widget.requests,
                 ),
             };
             final update = c.requiredUpdate;

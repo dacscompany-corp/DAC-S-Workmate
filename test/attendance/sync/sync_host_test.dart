@@ -48,19 +48,65 @@ void main() {
     expect(await delegateToLiveApp(), isTrue);
   });
 
-  test('concurrent delegations share one drain', () async {
+  test('concurrent delegations never overlap: the late one gets one more drain', () async {
     var calls = 0;
+    var running = 0;
+    var overlapped = false;
     final gate = Completer<bool>();
-    host = AttendanceSyncHost(drain: () {
+    host = AttendanceSyncHost(drain: () async {
       calls++;
-      return gate.future;
+      if (++running > 1) overlapped = true;
+      try {
+        return await gate.future;
+      } finally {
+        running--;
+      }
     })..register();
     final a = delegateToLiveApp();
     final b = delegateToLiveApp();
     await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(calls, 1, reason: 'never two at once');
     gate.complete(true);
     expect(await a, isTrue);
     expect(await b, isTrue);
+    expect(calls, 2);
+    expect(overlapped, isFalse);
+  });
+
+  test('a call during a drain runs one more drain; both callers get its result', () async {
+    var calls = 0;
+    final gates = [Completer<bool>(), Completer<bool>()];
+    host = AttendanceSyncHost(drain: () => gates[calls++].future);
+    final first = host!.drainNow();
+    await Future<void>.delayed(Duration.zero);
+    final second = host!.drainNow();
+    gates[0].complete(false);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, 2, reason: 'the row queued mid-drain gets a drain of its own');
+    gates[1].complete(true);
+    expect(await first, isTrue);
+    expect(await second, isTrue);
+    expect(calls, 2);
+  });
+
+  test('no call during a drain: exactly one drain', () async {
+    var calls = 0;
+    host = AttendanceSyncHost(drain: () async {
+      calls++;
+      return true;
+    });
+    expect(await host!.drainNow(), isTrue);
     expect(calls, 1);
+  });
+
+  test('a throwing drain returns false and frees the host for the next call', () async {
+    var calls = 0;
+    host = AttendanceSyncHost(drain: () async {
+      if (calls++ == 0) throw StateError('boom');
+      return true;
+    });
+    expect(await host!.drainNow(), isFalse);
+    expect(await host!.drainNow(), isTrue);
+    expect(calls, 2);
   });
 }

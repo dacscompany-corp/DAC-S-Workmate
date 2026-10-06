@@ -7,6 +7,10 @@ import 'package:workmate/attendance/sync/queue_settled.dart';
 import 'package:workmate/auth/login_failure.dart';
 import 'package:workmate/auth/worker_profile.dart';
 import 'package:workmate/profile/account_services.dart';
+import 'package:workmate/requests/data/requests_api.dart';
+import 'package:workmate/requests/domain/remote_request.dart';
+import 'package:workmate/requests/domain/request_status.dart';
+import 'package:workmate/requests/requests_services.dart';
 import 'package:workmate/terms/attendance_terms.dart';
 import 'package:workmate/ui/home_shell.dart';
 import 'package:workmate/ui/login_screen.dart';
@@ -15,6 +19,8 @@ import 'package:workmate/ui/theme.dart';
 import 'package:workmate/widget/start_flow.dart';
 
 import '../attendance/fakes.dart';
+import '../requests/domain/request_models_test.dart' show requestDoc;
+import '../requests/request_fakes.dart';
 
 Widget wrap(Widget w) => MaterialApp(theme: workMateTheme(), home: w);
 
@@ -167,5 +173,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Saved'), findsOneWidget);
     expect(scheduler.sendNows, sendsBefore); // no send loop
+  });
+
+  testWidgets('with Requests: a Requests tab, and the Home card opens it', (tester) async {
+    useTallPhone(tester);
+    final api = FakeRequestsApi()
+      ..view = RequestsView(entries: [RequestEntry(state: SyncState.needsResolution, remote: RemoteRequest.fromJson(requestDoc()))]);
+    await tester.pumpWidget(wrap(HomeShell(
+      worker: const WorkerProfile(id: 'u1', displayName: 'Juan dela Cruz', position: 'Mason', workerNo: 42),
+      versionName: '0.4.0',
+      onSignOut: () async {},
+      services: fakeServices(),
+      account: AccountServices(changePassword: (_) async {}, termsAcceptedAt: () async => null),
+      requests: RequestsServices(api: api, takePhoto: (_) async => null),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Requests'), findsWidgets);
+    expect(find.text('1 needs your attention'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('request-updates')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('new-request')), findsOneWidget);
+    expect(find.text('Needs resolution'), findsOneWidget);
+    // History still works from its own tab.
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+    expect(find.text('My attendance'), findsOneWidget);
   });
 }

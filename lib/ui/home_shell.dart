@@ -13,11 +13,17 @@ import '../attendance/ui/attendance_copy.dart';
 import '../auth/worker_profile.dart';
 import '../profile/account_services.dart';
 import '../profile/profile_screen.dart';
+import '../requests/home/request_updates_card.dart';
+import '../requests/list/requests_controller.dart';
+import '../requests/list/requests_screen.dart';
+import '../requests/requests_services.dart';
 import '../widget/start_flow.dart';
 
-/// The signed-in app: Home, History and Profile, and the four-step Time In /
-/// Time Out flow launched from Home. The flow is MODAL (no tabs while
-/// recording). Requests and Work tabs arrive with Stage 1.
+enum _Tab { home, requests, history, profile }
+
+/// The signed-in app: Home, Requests (Stage 1a), History and Profile, and the
+/// four-step Time In / Time Out flow launched from Home. The flow is MODAL (no
+/// tabs while recording).
 class HomeShell extends StatefulWidget {
   const HomeShell({
     super.key,
@@ -27,6 +33,7 @@ class HomeShell extends StatefulWidget {
     required this.services,
     required this.account,
     this.startRequests,
+    this.requests,
   });
 
   final WorkerProfile worker;
@@ -38,16 +45,22 @@ class HomeShell extends StatefulWidget {
   /// Widget taps waiting for Home to decide them.
   final StartFlowInbox? startRequests;
 
+  /// The Requests tab's services; null shows no Requests tab.
+  final RequestsServices? requests;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
-  int _tab = 0;
+  _Tab _tab = _Tab.home;
   TimeFlowController? _flow;
   Bilingual? _exitNotice;
   late final HomeController _home;
   late final HistoryController _history;
+  RequestsController? _requests;
+
+  List<_Tab> get _tabs => [_Tab.home, if (widget.requests != null) _Tab.requests, _Tab.history, _Tab.profile];
 
   @override
   void initState() {
@@ -55,9 +68,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final s = widget.services;
     _home = HomeController(attendance: s.attendance, scheduler: s.scheduler, rewards: s.rewards);
     _history = HistoryController(attendance: s.attendance);
+    final r = widget.requests;
+    if (r != null) _requests = RequestsController(api: r.api)..refresh();
     WidgetsBinding.instance.addObserver(this);
     _home.refresh();
     s.queueSettled?.addListener(_onQueueSettled);
+    // main.dart passes the same QueueSettled to both: listen once.
+    final changed = r?.changed;
+    if (changed != null && changed != s.queueSettled) changed.addListener(_onQueueSettled);
     widget.startRequests?.addListener(_consumeStart);
     _home.addListener(_consumeStart);
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumeStart());
@@ -92,18 +110,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// reader, the password sheet.
   void _showHome() {
     Navigator.of(context).popUntil((route) => route.isFirst);
-    if (_tab != 0) setState(() => _tab = 0);
+    if (_tab != _Tab.home) setState(() => _tab = _Tab.home);
   }
 
   void _onQueueSettled() {
     // Not while recording: the flow owns the screen, and _endFlow refreshes anyway.
     if (_flow == null) _home.refresh(sendQueued: false);
-    if (_tab == 1) _history.refresh();
+    if (_tab == _Tab.history) _history.refresh();
+    _requests?.refresh();
   }
 
   @override
   void dispose() {
     widget.services.queueSettled?.removeListener(_onQueueSettled);
+    final changed = widget.requests?.changed;
+    if (changed != null && changed != widget.services.queueSettled) changed.removeListener(_onQueueSettled);
     WidgetsBinding.instance.removeObserver(this);
     widget.startRequests?.removeListener(_consumeStart);
     _home.removeListener(_consumeStart);
@@ -111,6 +132,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _flow?.dispose();
     _home.dispose();
     _history.dispose();
+    _requests?.dispose();
     super.dispose();
   }
 
@@ -119,7 +141,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     // Back in the app is when a worker can see "Not sent yet": re-read today and
     // send what waits. Not while recording — the camera's permission prompts
     // pause and resume the app too.
-    if (state == AppLifecycleState.resumed && _flow == null) _home.refresh();
+    if (state == AppLifecycleState.resumed && _flow == null) {
+      _home.refresh();
+      _requests?.refresh();
+    }
   }
 
   void _startFlow(TimeDirection direction) {
@@ -151,9 +176,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _endFlow(notice: reason == FlowExit.cameraPermission ? flowCancelledByCamera(flow.direction) : null);
   }
 
-  void _selectTab(int tab) {
+  void _selectTab(_Tab tab) {
     setState(() => _tab = tab);
-    if (tab == 1) _history.refresh();
+    if (tab == _Tab.history) _history.refresh();
+    if (tab == _Tab.requests) _requests?.refresh();
   }
 
   @override
@@ -170,28 +196,41 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         openSettings: s.openSettings,
       );
     }
+    final requests = _requests;
     final body = switch (_tab) {
-      0 => HomeScreen(
+      _Tab.home => HomeScreen(
           worker: widget.worker,
           controller: _home,
           onStartFlow: _startFlow,
-          onSeeHistory: () => _selectTab(1),
+          onSeeHistory: () => _selectTab(_Tab.history),
           openSettings: s.openSettings,
           exitNotice: _exitNotice,
           onDismissExit: () => setState(() => _exitNotice = null),
+          requestUpdates: requests == null
+              ? null
+              : ListenableBuilder(
+                  listenable: requests,
+                  builder: (context, _) => RequestUpdatesCard(updates: requests.updates, onOpen: () => _selectTab(_Tab.requests)),
+                ),
         ),
-      1 => HistoryScreen(controller: _history, photoUrl: s.photoUrl),
-      _ => ProfileScreen(worker: widget.worker, versionName: widget.versionName, onSignOut: widget.onSignOut, account: widget.account),
+      _Tab.requests => RequestsScreen(controller: requests!, services: widget.requests!),
+      _Tab.history => HistoryScreen(controller: _history, photoUrl: s.photoUrl),
+      _Tab.profile => ProfileScreen(worker: widget.worker, versionName: widget.versionName, onSignOut: widget.onSignOut, account: widget.account),
     };
+    final tabs = _tabs;
     return Scaffold(
       body: SafeArea(child: body),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _selectTab,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+        selectedIndex: tabs.indexOf(_tab),
+        onDestinationSelected: (i) => _selectTab(tabs[i]),
+        destinations: [
+          for (final t in tabs)
+            switch (t) {
+              _Tab.home => const NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+              _Tab.requests => const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Requests'),
+              _Tab.history => const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+              _Tab.profile => const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+            },
         ],
       ),
     );

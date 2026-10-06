@@ -33,6 +33,10 @@ import 'net/supabase_setup.dart';
 import 'net/update_nudges.dart';
 import 'net/workmate_http_client.dart';
 import 'profile/account_services.dart';
+import 'requests/data/request_remote.dart';
+import 'requests/data/request_repository.dart';
+import 'requests/data/requests_db.dart';
+import 'requests/requests_services.dart';
 import 'terms/terms_repository.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
@@ -75,10 +79,15 @@ Future<void> main() async {
   String Function() letInWorker = () => '';
   final queueSettled = QueueSettled();
   final syncHost = AttendanceSyncHost(
-    drain: () => syncWith(client, afterChange: (db, workerId) async {
-      await widgets.publishIfCurrent(db, workerId, () => letInWorker());
-      queueSettled.fire();
-    }),
+    drain: () => syncWith(
+      client,
+      afterChange: (db, workerId) async {
+        await widgets.publishIfCurrent(db, workerId, () => letInWorker());
+        queueSettled.fire();
+      },
+      // Requests are not on the widget: only the screens are told.
+      onRequestsSettled: queueSettled.fire,
+    ),
   )..register();
 
   // Background sending of queued Time Ins / Time Outs. The sweeper is the
@@ -153,6 +162,30 @@ Future<void> main() async {
     },
   );
 
+  // Requests (Stage 1a): the same worker scope, the same background task. If
+  // its database cannot open, the app starts without the Requests tab:
+  // attendance must never depend on it.
+  RequestsServices? requests;
+  try {
+    requests = RequestsServices(
+      api: RequestRepository(
+        db: await openDeviceRequestsDb(),
+        remote: SupabaseRequestRemote(client),
+        device: device,
+        scheduler: scheduler,
+        currentWorkerId: attendance.currentWorkerId,
+        photoDir: () async =>
+            Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}request-photos'),
+        sendNow: () async {
+          await syncHost.drainNow();
+        },
+      ),
+      changed: queueSettled,
+    );
+  } catch (e) {
+    debugPrint('Requests unavailable: $e');
+  }
+
   runApp(WorkMateApp(
     controller: controller,
     updates: updates,
@@ -162,5 +195,6 @@ Future<void> main() async {
     account: account,
     onResumed: syncHost.register,
     launches: const ChannelLaunchRequests(),
+    requests: requests,
   ));
 }
