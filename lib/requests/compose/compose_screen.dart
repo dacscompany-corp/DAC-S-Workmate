@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../attendance/domain/event_id.dart';
 import '../../attendance/ui/attendance_copy.dart';
+import '../../history/data/history_api.dart';
+import '../../history/ui/history_thumb.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
 import '../domain/quantity.dart';
@@ -20,10 +22,14 @@ import 'item_editor_screen.dart';
 /// job → one team for the whole request (or just me) → items. Pops true when
 /// the request was queued.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key, required this.draft, required this.services, this.now = DateTime.now});
+  const ComposeScreen({super.key, required this.draft, required this.services, this.editLineOnOpen, this.now = DateTime.now});
 
   final RequestDraft draft;
   final RequestsServices services;
+
+  /// Opens this line's editor once the lists load: Request Again from the
+  /// Requests tab lands on the quantity (spec 1b §4.3 "standalone").
+  final String? editLineOnOpen;
   final DateTime Function() now;
 
   @override
@@ -31,8 +37,22 @@ class ComposeScreen extends StatefulWidget {
 }
 
 class _ComposeScreenState extends State<ComposeScreen> {
-  late final ComposeController _c = ComposeController(api: widget.services.api, draft: widget.draft)..load();
+  late final ComposeController _c = ComposeController(api: widget.services.api, draft: widget.draft);
   late final _note = TextEditingController(text: widget.draft.note);
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_c.load().then((_) => _openLineOnLoad()));
+  }
+
+  void _openLineOnLoad() {
+    final id = widget.editLineOnOpen;
+    if (id == null || !mounted) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return; // the worker already opened something
+    final line = _c.draft.lines.where((l) => l.id == id).firstOrNull;
+    if (line != null) unawaited(_editLine(line, isNew: false));
+  }
 
   @override
   void dispose() {
@@ -82,6 +102,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
         iLead: _c.iLead,
         draftId: _c.draft.id,
         services: widget.services,
+        destinations: refs?.destinations ?? const [],
         now: widget.now,
       ),
     ));
@@ -197,6 +218,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                     _LineCard(
                       key: Key('line-$i'),
                       line: d.lines[i],
+                      history: widget.services.history,
                       hasIssue: lineIssues.contains(i),
                       onTap: () => _editLine(d.lines[i], isNew: false),
                     ),
@@ -286,8 +308,12 @@ class _Choice extends StatelessWidget {
 }
 
 class _LineCard extends StatelessWidget {
-  const _LineCard({super.key, required this.line, required this.hasIssue, required this.onTap});
+  const _LineCard({super.key, required this.line, required this.history, required this.hasIssue, required this.onTap});
   final DraftLine line;
+
+  /// Shows a Find Previous Item line's cover photo, for recognition only:
+  /// it is not one of the request's photos (spec 1b §4.3).
+  final HistoryApi? history;
   final bool hasIssue;
   final VoidCallback onTap;
 
@@ -306,7 +332,13 @@ class _LineCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: hasIssue ? WmColors.danger : WmColors.border),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (history != null && line.refCoverPath != null) ...[
+              HistoryThumb(key: const Key('line-cover'), history: history!, path: line.refCoverPath, size: 44),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(
                 child: Text(line.description.isEmpty ? 'Unnamed item' : line.description,
@@ -326,6 +358,8 @@ class _LineCard extends StatelessWidget {
             ),
             if (line.urgent) ...[const SizedBox(height: 6), UrgentTag(neededBy: line.neededBy)],
             if (hasIssue) const Text('Check this item.', style: TextStyle(color: WmColors.danger, fontSize: 12.5)),
+              ]),
+            ),
           ]),
         ),
       ),

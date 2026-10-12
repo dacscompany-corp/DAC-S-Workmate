@@ -29,6 +29,10 @@ import 'auth/auth_repository.dart';
 import 'auth/session_storage.dart';
 import 'auth/sign_in_api.dart';
 import 'auth/worker_cache.dart';
+import 'history/data/history_account_wipe.dart';
+import 'history/data/history_db.dart';
+import 'history/data/history_remote.dart';
+import 'history/data/history_repository.dart';
 import 'net/supabase_setup.dart';
 import 'net/update_nudges.dart';
 import 'net/workmate_http_client.dart';
@@ -162,6 +166,26 @@ Future<void> main() async {
     },
   );
 
+  // Find Previous Item (Stage 1b): optional like Requests — if its database
+  // cannot open, Requests works without it. The saved copy is kept for the
+  // signed-in worker only (spec 1b §4.4).
+  HistoryRepository? history;
+  try {
+    final repo = HistoryRepository(
+      db: await openDeviceHistoryDb(),
+      remote: SupabaseHistoryRemote(client),
+      currentWorkerId: attendance.currentWorkerId,
+      photoDir: () async =>
+          Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}history-photos'),
+    );
+    final wipe = HistoryAccountWipe(repo);
+    controller.addListener(() => wipe.onAppState(controller.state));
+    wipe.onAppState(controller.state);
+    history = repo;
+  } catch (e) {
+    debugPrint('Find Previous Item unavailable: $e');
+  }
+
   // Requests (Stage 1a): the same worker scope, the same background task. If
   // its database cannot open, the app starts without the Requests tab:
   // attendance must never depend on it.
@@ -181,6 +205,7 @@ Future<void> main() async {
         },
       ),
       changed: queueSettled,
+      history: history,
     );
   } catch (e) {
     debugPrint('Requests unavailable: $e');

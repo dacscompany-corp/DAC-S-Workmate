@@ -55,6 +55,9 @@ Bilingual requestFailureCopy(RequestFailure f) => switch (f) {
       RequestFailure.badCatalogItem => const Bilingual(
           'An item is no longer in the list. Choose it again or describe it.',
           'Wala na sa listahan ang isang item. Piliin ulit o ilarawan ito.'),
+      RequestFailure.badReference => const Bilingual(
+          'An item picked from Find Previous Item could not be matched. Pick it again, then send again.',
+          'Hindi maitugma ang isang item na pinili sa Find Previous Item. Piliin ulit, tapos ipadala ulit.'),
       RequestFailure.incomplete => const Bilingual(
           'Something in this request is incomplete. Check each item, then send again.',
           'May kulang sa request na ito. Suriin ang bawat item, tapos ipadala ulit.'),

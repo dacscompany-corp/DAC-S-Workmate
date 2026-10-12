@@ -1,3 +1,4 @@
+import '../../history/domain/history_models.dart';
 import 'quantity.dart';
 import 'request_models.dart';
 
@@ -22,7 +23,25 @@ class DraftLine {
     this.neededBy,
     this.notes = '',
     this.photos = const [],
+    this.refKind,
+    this.refId,
+    this.refCoverPath,
   });
+
+  /// Request Again (spec 1b §4.3): the item and the history entry the worker
+  /// recognised. Quantity and needed-by stay for the worker to fill in.
+  factory DraftLine.fromHistory(String id, HistoryPick pick) => DraftLine(
+        id: id,
+        kind: pick.kind,
+        catalogItemId: pick.itemId,
+        description: pick.name,
+        spec: pick.spec,
+        unit: pick.unit,
+        category: pick.category,
+        refKind: pick.refKind,
+        refId: pick.refId,
+        refCoverPath: pick.coverPath,
+      );
 
   /// A line copied from an official catalogue item (spec §4A).
   factory DraftLine.fromCatalog(String id, CatalogItem item) => DraftLine(
@@ -51,6 +70,9 @@ class DraftLine {
         neededBy: j['needed_by'] as String?,
         notes: (j['notes'] as String?) ?? '',
         photos: [for (final p in (j['photos'] as List<dynamic>? ?? const [])) p as String],
+        refKind: j['ref_kind'] as String?,
+        refId: j['ref_id'] as String?,
+        refCoverPath: j['ref_cover_path'] as String?,
       );
 
   final String id;
@@ -78,6 +100,17 @@ class DraftLine {
   /// Prepared JPEGs in app-private storage, sent after the request lands.
   final List<String> photos;
 
+  /// The history entry this line was requested again from ('request_line' or
+  /// 'reference' + its id), or null. Both or neither; tied to [catalogItemId].
+  final String? refKind;
+  final String? refId;
+
+  /// The item's gallery cover (bucket item-gallery), shown for recognition only —
+  /// never sent and never attached as a request photo.
+  final String? refCoverPath;
+
+  bool get fromHistory => refKind != null && refId != null;
+
   bool get fromCatalog => catalogItemId != null;
 
   DraftLine copyWith({
@@ -95,6 +128,9 @@ class DraftLine {
     Object? neededBy = _keep,
     String? notes,
     List<String>? photos,
+    Object? refKind = _keep,
+    Object? refId = _keep,
+    Object? refCoverPath = _keep,
   }) =>
       DraftLine(
         id: id,
@@ -112,7 +148,13 @@ class DraftLine {
         neededBy: identical(neededBy, _keep) ? this.neededBy : neededBy as String?,
         notes: notes ?? this.notes,
         photos: photos ?? this.photos,
+        refKind: identical(refKind, _keep) ? this.refKind : refKind as String?,
+        refId: identical(refId, _keep) ? this.refId : refId as String?,
+        refCoverPath: identical(refCoverPath, _keep) ? this.refCoverPath : refCoverPath as String?,
       );
+
+  /// The same line with no Request Again link (another item was picked).
+  DraftLine withoutRef() => copyWith(refKind: null, refId: null, refCoverPath: null);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -130,6 +172,9 @@ class DraftLine {
         'needed_by': neededBy,
         'notes': notes,
         'photos': photos,
+        'ref_kind': refKind,
+        'ref_id': refId,
+        'ref_cover_path': refCoverPath,
       };
 }
 
@@ -270,6 +315,10 @@ Map<String, dynamic> submitPayload(RequestDraft d) => {
             if (l.urgent) 'urgent_reason': l.urgentReason.trim(),
             if (l.urgent) 'needed_by': l.neededBy,
             'notes': l.notes.trim(),
+            // 0090: the server keeps the link only while the worker may still see
+            // that entry of the same item; otherwise it saves the line without it.
+            if (l.catalogItemId != null && l.fromHistory) 'ref_kind': l.refKind,
+            if (l.catalogItemId != null && l.fromHistory) 'ref_id': l.refId,
           },
       ],
     };

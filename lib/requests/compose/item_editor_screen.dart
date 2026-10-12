@@ -3,6 +3,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../history/data/history_api.dart';
+import '../../history/domain/history_models.dart';
+import '../../history/ui/find_previous_screen.dart';
+import '../../history/ui/history_thumb.dart';
 import '../../ui/theme.dart';
 import '../domain/quantity.dart';
 import '../domain/request_draft.dart';
@@ -37,6 +41,7 @@ class ItemEditorScreen extends StatefulWidget {
     required this.iLead,
     required this.draftId,
     required this.services,
+    this.destinations = const [],
     this.now = DateTime.now,
   });
 
@@ -49,6 +54,9 @@ class ItemEditorScreen extends StatefulWidget {
   final bool iLead;
   final String draftId;
   final RequestsServices services;
+
+  /// The worker's projects, for Find Previous Item's project filter.
+  final List<Destination> destinations;
   final DateTime Function() now;
 
   @override
@@ -141,8 +149,25 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
     ];
   }
 
-  void _pick(CatalogItem item) {
-    final picked = DraftLine.fromCatalog(_line.id, item);
+  void _pick(CatalogItem item) => _take(DraftLine.fromCatalog(_line.id, item));
+
+  /// Find Previous Item: the item comes back filled in with its link to the
+  /// history row; the worker still sets quantity and needed-by (spec 1b §4.3).
+  Future<void> _findPrevious(HistoryApi history) async {
+    final pick = await Navigator.of(context).push<HistoryPick>(MaterialPageRoute(
+      builder: (_) => FindPreviousScreen(
+        history: history,
+        projects: historyProjects(widget.destinations),
+        categories: historyCategories(widget.catalog),
+        now: widget.now,
+      ),
+    ));
+    if (pick != null && mounted) _take(DraftLine.fromHistory(_line.id, pick));
+  }
+
+  /// Takes a picked item's fields AND its history link: a pick from the
+  /// list carries none, so it clears a link left from an earlier pick.
+  void _take(DraftLine picked) {
     setState(() {
       _line = _current.copyWith(
         kind: picked.kind,
@@ -151,6 +176,9 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
         spec: picked.spec,
         unit: picked.unit,
         category: picked.category,
+        refKind: picked.refKind,
+        refId: picked.refId,
+        refCoverPath: picked.refCoverPath,
         // A tool's responsible person is named at issue, not here (spec §4A).
         memberId: picked.kind == ItemKind.tool ? null : _line.memberId,
         memberName: picked.kind == ItemKind.tool ? null : _line.memberName,
@@ -174,7 +202,7 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
 
   /// Back to the list to pick another item.
   void _unpick() => setState(() {
-        _line = _current.copyWith(catalogItemId: null);
+        _line = _current.withoutRef().copyWith(catalogItemId: null);
         _clearItemFields();
         _describing = false;
       });
@@ -266,7 +294,7 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
             selected: {kind},
             onSelectionChanged: (s) => setState(() {
               final wasPicked = _line.fromCatalog;
-              _line = _current.copyWith(
+              _line = _current.withoutRef().copyWith(
                 kind: s.first,
                 catalogItemId: null,
                 memberId: s.first == ItemKind.tool ? null : _line.memberId,
@@ -277,7 +305,7 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
           ),
           const SizedBox(height: 16),
           if (_line.fromCatalog) ...[
-            _Picked(line: _current, onChange: _unpick),
+            _Picked(line: _current, history: widget.services.history, onChange: _unpick),
           ] else if (!_describing) ...[
             TextField(
               key: const Key('item-search'),
@@ -304,6 +332,13 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
               icon: const Icon(Icons.edit_note),
               label: const Text('Not in the list? Describe it'),
             ),
+            if (widget.services.history case final history?)
+              TextButton.icon(
+                key: const Key('item-find-previous'),
+                onPressed: () => _findPrevious(history),
+                icon: const Icon(Icons.history),
+                label: const Text('Find previous item'),
+              ),
           ] else ...[
             const Text('Describe the item. The office will match it to the list.',
                 style: TextStyle(color: WmColors.textMuted, fontSize: 13)),
@@ -407,8 +442,9 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
 }
 
 class _Picked extends StatelessWidget {
-  const _Picked({required this.line, required this.onChange});
+  const _Picked({required this.line, required this.history, required this.onChange});
   final DraftLine line;
+  final HistoryApi? history;
   final VoidCallback onChange;
 
   @override
@@ -416,12 +452,17 @@ class _Picked extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: WmColors.greenTint, borderRadius: BorderRadius.circular(14)),
         child: Row(children: [
-          const Icon(Icons.inventory_2_outlined, color: WmColors.green),
+          if (history != null && line.refCoverPath != null)
+            HistoryThumb(key: const Key('item-cover'), history: history!, path: line.refCoverPath, size: 48)
+          else
+            const Icon(Icons.inventory_2_outlined, color: WmColors.green),
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(line.description, style: const TextStyle(fontWeight: FontWeight.w800)),
               Text([if (line.spec.isNotEmpty) line.spec, line.unit].join(' · '), style: const TextStyle(color: WmColors.textMuted)),
+              if (line.fromHistory)
+                const Text('From Find Previous Item', key: Key('item-from-history'), style: TextStyle(fontSize: 12.5, color: WmColors.green)),
             ]),
           ),
           TextButton(key: const Key('item-change'), onPressed: onChange, child: const Text('Change')),

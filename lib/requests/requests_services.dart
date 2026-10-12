@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../history/data/history_api.dart';
 import 'camera/request_camera_screen.dart';
 import 'data/requests_api.dart';
 
@@ -12,11 +13,15 @@ Future<String?> realTakePhoto(BuildContext context) => Navigator.of(context).pus
 
 /// Everything the Requests screens need, built once in main.dart.
 class RequestsServices {
-  const RequestsServices({required this.api, this.takePhoto = realTakePhoto, this.changed});
+  const RequestsServices({required this.api, this.takePhoto = realTakePhoto, this.changed, this.history});
 
   final RequestsApi api;
   final TakePhoto takePhoto;
 
   /// Fires when the live app's background drain settled queued operations.
   final Listenable? changed;
+
+  /// Find Previous Item (Stage 1b); null hides it, e.g. when its database
+  /// could not open.
+  final HistoryApi? history;
 }

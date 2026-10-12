@@ -125,6 +125,7 @@ class FakeRequestRemote implements RequestRemote {
 class FakeRequestsApi implements RequestsApi {
   RequestReferences refs = const RequestReferences(destinations: [site, fence], teams: [masonry], catalog: [pipe, drill]);
   Object? refsError;
+  Completer<void>? refsGate;
   RequestsView view = const RequestsView(entries: []);
   Object? viewError;
   Completer<void>? viewGate;
@@ -138,6 +139,7 @@ class FakeRequestsApi implements RequestsApi {
 
   @override
   Future<RequestReferences> references() async {
+    if (refsGate != null) await refsGate!.future;
     if (refsError != null) throw refsError!;
     return refs;
   }

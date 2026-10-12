@@ -12,6 +12,9 @@ enum RequestFailure {
   notTeamLeader,
   badMember,
   badCatalogItem,
+
+  /// 0090 BAD_REFERENCE: a Request Again link the server cannot use.
+  badReference,
   incomplete,
   badQuantity,
   urgentNeedsReason,
@@ -31,6 +34,7 @@ enum RequestFailure {
     'NOT_TEAM_LEADER': notTeamLeader,
     'BAD_MEMBER': badMember,
     'BAD_CATALOG_ITEM': badCatalogItem,
+    'BAD_REFERENCE': badReference,
     'BAD_LINE': incomplete,
     'NO_LINES': incomplete,
     'TOO_MANY_LINES': incomplete,

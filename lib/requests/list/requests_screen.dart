@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../attendance/domain/event_id.dart';
 import '../../attendance/ui/attendance_copy.dart';
 import '../../attendance/ui/formats.dart';
+import '../../history/data/history_api.dart';
+import '../../history/domain/history_models.dart';
+import '../../history/ui/find_previous_screen.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
 import '../compose/compose_screen.dart';
@@ -22,9 +26,38 @@ class RequestsScreen extends StatelessWidget {
   final RequestsController controller;
   final RequestsServices services;
 
-  Future<void> _compose(BuildContext context, RequestDraft draft) async {
-    await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposeScreen(draft: draft, services: services)));
+  Future<void> _compose(BuildContext context, RequestDraft draft, {String? editLine}) async {
+    await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => ComposeScreen(draft: draft, services: services, editLineOnOpen: editLine)));
     await controller.refresh();
+  }
+
+  /// Request Again from the tab (spec 1b §4.3 "standalone"): a new draft
+  /// holding the picked item, opened on that item for quantity and date;
+  /// the worker then chooses the project, work and team. Never sends.
+  Future<void> _findPrevious(BuildContext context, HistoryApi history) async {
+    // The filter lists; a slow signal must not hold the screen back.
+    RequestReferences? refs;
+    try {
+      refs = await services.api.references().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    if (!context.mounted) return;
+    final pick = await Navigator.of(context).push<HistoryPick>(MaterialPageRoute(
+      builder: (_) => FindPreviousScreen(
+        history: history,
+        projects: historyProjects(refs?.destinations ?? const []),
+        categories: historyCategories(refs?.catalog ?? const []),
+      ),
+    ));
+    if (pick == null || !context.mounted) return;
+    final line = DraftLine.fromHistory(newEventId(), pick);
+    final draft = services.api.newDraft().copyWith(lines: [line]);
+    try {
+      await services.api.saveDraft(draft);
+    } catch (_) {
+      // Compose saves again on the first change.
+    }
+    if (context.mounted) await _compose(context, draft, editLine: line.id);
   }
 
   /// The draft is stored on its first change (ComposeController saves every
@@ -75,6 +108,10 @@ class RequestsScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 4),
               const Text('Materials and tools for your projects.', style: TextStyle(color: WmColors.textMuted)),
+              if (services.history case final history?) ...[
+                const SizedBox(height: 10),
+                _FindPreviousButton(onPressed: () => _findPrevious(context, history)),
+              ],
               const SizedBox(height: 12),
               if (failure != null) ...[
                 if (view != null && view.fetchedAt != null)
@@ -160,6 +197,43 @@ class _EntryCard extends StatelessWidget {
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// Shows a spinner while the search flow is starting and ignores taps until
+/// it ends, so a second tap cannot stack another search screen.
+class _FindPreviousButton extends StatefulWidget {
+  const _FindPreviousButton({required this.onPressed});
+
+  final Future<void> Function() onPressed;
+
+  @override
+  State<_FindPreviousButton> createState() => _FindPreviousButtonState();
+}
+
+class _FindPreviousButtonState extends State<_FindPreviousButton> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onPressed();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      key: const Key('find-previous'),
+      onPressed: _busy ? null : _run,
+      icon: _busy
+          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.history),
+      label: const Text('Find previous item'),
     );
   }
 }
