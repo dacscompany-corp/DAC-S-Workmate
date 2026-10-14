@@ -14,6 +14,7 @@ import 'ui/update_overlay.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
 import 'widget/start_flow.dart';
+import 'workplan/workplan_services.dart';
 
 class WorkMateApp extends StatefulWidget {
   const WorkMateApp({
@@ -27,6 +28,7 @@ class WorkMateApp extends StatefulWidget {
     this.onResumed,
     this.launches,
     this.requests,
+    this.workPlan,
   });
 
   final AppController controller;
@@ -48,6 +50,9 @@ class WorkMateApp extends StatefulWidget {
 
   /// The Requests tab (Stage 1a); null in tests that do not need it.
   final RequestsServices? requests;
+
+  /// The My Work tab (Stage 1c); null in tests that do not need it.
+  final WorkPlanServices? workPlan;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -128,6 +133,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   account: widget.account,
                   startRequests: _inbox,
                   requests: widget.requests,
+                  workPlan: widget.workPlan,
                 ),
             };
             final update = c.requiredUpdate;

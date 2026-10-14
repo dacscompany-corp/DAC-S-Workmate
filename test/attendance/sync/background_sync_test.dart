@@ -99,6 +99,32 @@ void main() {
       expect(log, ['afterAttendance']);
     });
 
+    test('My Work drains after requests; its failure only asks WorkManager to come back', () async {
+      final log = <String>[];
+      final ok = await drainInOrder(
+        attendance: () async => (result: SyncResult.done, settled: 0),
+        requests: () async {
+          log.add('requests');
+          return (result: SyncResult.done, settled: 0);
+        },
+        workPlan: () async {
+          log.add('workPlan');
+          return (result: SyncResult.done, settled: 2);
+        },
+        attendanceWaiting: () async => false,
+        onWorkPlanSettled: () => log.add('onWorkPlanSettled'),
+      );
+      expect(ok, isTrue);
+      expect(log, ['requests', 'workPlan', 'onWorkPlanSettled']);
+      final failed = await drainInOrder(
+        attendance: () async => (result: SyncResult.done, settled: 1),
+        requests: () async => (result: SyncResult.done, settled: 0),
+        workPlan: () async => throw StateError('workplan db broken'),
+        attendanceWaiting: () async => false,
+      );
+      expect(failed, isFalse, reason: 'WorkManager comes back for My Work');
+    });
+
     test('a failing screen notice changes nothing', () async {
       final result = await drainInOrder(
         attendance: () async => (result: SyncResult.done, settled: 1),

@@ -18,10 +18,15 @@ import '../requests/list/requests_controller.dart';
 import '../requests/list/requests_screen.dart';
 import '../requests/requests_services.dart';
 import '../widget/start_flow.dart';
+import '../workplan/ui/my_work_card.dart';
+import '../workplan/ui/my_work_controller.dart';
+import '../workplan/ui/my_work_screen.dart';
+import '../workplan/workplan_services.dart';
 
-enum _Tab { home, requests, history, profile }
+enum _Tab { home, work, requests, history, profile }
 
-/// The signed-in app: Home, Requests (Stage 1a), History and Profile, and the
+/// The signed-in app: Home, My Work (Stage 1c), Requests (Stage 1a), History
+/// and Profile, and the
 /// four-step Time In / Time Out flow launched from Home. The flow is MODAL (no
 /// tabs while recording).
 class HomeShell extends StatefulWidget {
@@ -34,6 +39,7 @@ class HomeShell extends StatefulWidget {
     required this.account,
     this.startRequests,
     this.requests,
+    this.workPlan,
   });
 
   final WorkerProfile worker;
@@ -48,6 +54,9 @@ class HomeShell extends StatefulWidget {
   /// The Requests tab's services; null shows no Requests tab.
   final RequestsServices? requests;
 
+  /// The My Work tab's services; null shows no My Work tab.
+  final WorkPlanServices? workPlan;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -59,8 +68,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   late final HomeController _home;
   late final HistoryController _history;
   RequestsController? _requests;
+  MyWorkController? _work;
 
-  List<_Tab> get _tabs => [_Tab.home, if (widget.requests != null) _Tab.requests, _Tab.history, _Tab.profile];
+  List<_Tab> get _tabs => [
+        _Tab.home,
+        if (widget.workPlan != null) _Tab.work,
+        if (widget.requests != null) _Tab.requests,
+        _Tab.history,
+        _Tab.profile,
+      ];
 
   @override
   void initState() {
@@ -70,12 +86,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _history = HistoryController(attendance: s.attendance);
     final r = widget.requests;
     if (r != null) _requests = RequestsController(api: r.api)..refresh();
+    final w = widget.workPlan;
+    if (w != null) _work = MyWorkController(api: w.api)..refresh();
     WidgetsBinding.instance.addObserver(this);
     _home.refresh();
-    s.queueSettled?.addListener(_onQueueSettled);
-    // main.dart passes the same QueueSettled to both: listen once.
-    final changed = r?.changed;
-    if (changed != null && changed != s.queueSettled) changed.addListener(_onQueueSettled);
+    // main.dart passes the same QueueSettled to all of them: listen once each.
+    for (final l in _changeSources) {
+      l.addListener(_onQueueSettled);
+    }
     widget.startRequests?.addListener(_consumeStart);
     _home.addListener(_consumeStart);
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumeStart());
@@ -113,18 +131,26 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (_tab != _Tab.home) setState(() => _tab = _Tab.home);
   }
 
+  /// Every "the background drain settled something" source, each once.
+  Set<Listenable> get _changeSources => {
+        ?widget.services.queueSettled,
+        ?widget.requests?.changed,
+        ?widget.workPlan?.changed,
+      };
+
   void _onQueueSettled() {
     // Not while recording: the flow owns the screen, and _endFlow refreshes anyway.
     if (_flow == null) _home.refresh(sendQueued: false);
     if (_tab == _Tab.history) _history.refresh();
     _requests?.refresh();
+    _work?.refresh();
   }
 
   @override
   void dispose() {
-    widget.services.queueSettled?.removeListener(_onQueueSettled);
-    final changed = widget.requests?.changed;
-    if (changed != null && changed != widget.services.queueSettled) changed.removeListener(_onQueueSettled);
+    for (final l in _changeSources) {
+      l.removeListener(_onQueueSettled);
+    }
     WidgetsBinding.instance.removeObserver(this);
     widget.startRequests?.removeListener(_consumeStart);
     _home.removeListener(_consumeStart);
@@ -133,6 +159,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _home.dispose();
     _history.dispose();
     _requests?.dispose();
+    _work?.dispose();
     super.dispose();
   }
 
@@ -144,6 +171,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && _flow == null) {
       _home.refresh();
       _requests?.refresh();
+      _work?.refresh();
     }
   }
 
@@ -180,6 +208,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     setState(() => _tab = tab);
     if (tab == _Tab.history) _history.refresh();
     if (tab == _Tab.requests) _requests?.refresh();
+    if (tab == _Tab.work) _work?.refresh();
+  }
+
+  /// A materials problem's "Make a request": back to the tabs, on Requests.
+  void _openRequests() {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _selectTab(_Tab.requests);
   }
 
   @override
@@ -197,6 +232,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       );
     }
     final requests = _requests;
+    final work = _work;
+    final cards = [
+      if (work != null)
+        ListenableBuilder(
+          listenable: work,
+          builder: (context, _) => MyWorkCard(updates: work.updates, onOpen: () => _selectTab(_Tab.work)),
+        ),
+      if (requests != null)
+        ListenableBuilder(
+          listenable: requests,
+          builder: (context, _) => RequestUpdatesCard(updates: requests.updates, onOpen: () => _selectTab(_Tab.requests)),
+        ),
+    ];
     final body = switch (_tab) {
       _Tab.home => HomeScreen(
           worker: widget.worker,
@@ -206,12 +254,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           openSettings: s.openSettings,
           exitNotice: _exitNotice,
           onDismissExit: () => setState(() => _exitNotice = null),
-          requestUpdates: requests == null
-              ? null
-              : ListenableBuilder(
-                  listenable: requests,
-                  builder: (context, _) => RequestUpdatesCard(updates: requests.updates, onOpen: () => _selectTab(_Tab.requests)),
-                ),
+          requestUpdates: cards.isEmpty ? null : Column(children: cards),
+        ),
+      _Tab.work => MyWorkScreen(
+          controller: work!,
+          services: widget.workPlan!,
+          isLeader: widget.worker.role == 'teamLeader',
+          onMakeRequest: requests == null ? null : _openRequests,
         ),
       _Tab.requests => RequestsScreen(controller: requests!, services: widget.requests!),
       _Tab.history => HistoryScreen(controller: _history, photoUrl: s.photoUrl),
@@ -227,6 +276,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           for (final t in tabs)
             switch (t) {
               _Tab.home => const NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+              _Tab.work => NavigationDestination(icon: _WorkIcon(controller: work!), label: 'My Work'),
               _Tab.requests => const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Requests'),
               _Tab.history => const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
               _Tab.profile => const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
@@ -235,4 +285,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+/// The My Work tab's icon, with a red number for what needs the worker
+/// (tasks to read or check, actions not accepted).
+class _WorkIcon extends StatelessWidget {
+  const _WorkIcon({required this.controller});
+  final MyWorkController controller;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final n = controller.updates.badge;
+          return Badge(
+            key: const Key('my-work-badge'),
+            isLabelVisible: n > 0,
+            label: Text('$n'),
+            child: const Icon(Icons.assignment_outlined),
+          );
+        },
+      );
 }

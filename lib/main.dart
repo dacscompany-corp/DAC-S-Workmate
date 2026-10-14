@@ -49,6 +49,11 @@ import 'widget/widget_app_sync.dart';
 import 'widget/widget_aware_attendance.dart';
 import 'widget/widget_bridge.dart';
 import 'widget/widget_publisher.dart';
+import 'workplan/data/workplan_account_wipe.dart';
+import 'workplan/data/workplan_db.dart';
+import 'workplan/data/workplan_remote.dart';
+import 'workplan/data/workplan_repository.dart';
+import 'workplan/workplan_services.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -89,8 +94,9 @@ Future<void> main() async {
         await widgets.publishIfCurrent(db, workerId, () => letInWorker());
         queueSettled.fire();
       },
-      // Requests are not on the widget: only the screens are told.
+      // Requests and My Work are not on the widget: only the screens are told.
       onRequestsSettled: queueSettled.fire,
+      onWorkPlanSettled: queueSettled.fire,
     ),
   )..register();
 
@@ -211,6 +217,31 @@ Future<void> main() async {
     debugPrint('Requests unavailable: $e');
   }
 
+  // My Work (Stage 1c): the same worker scope, the same background task. If
+  // its database cannot open, the app starts without the My Work tab:
+  // attendance must never depend on it. The saved copy is kept for the
+  // signed-in worker only (spec §11); unsent actions always wait.
+  WorkPlanServices? workPlan;
+  try {
+    final repo = WorkPlanRepository(
+      db: await openDeviceWorkPlanDb(),
+      remote: SupabaseWorkPlanRemote(client),
+      device: device,
+      scheduler: scheduler,
+      currentWorkerId: attendance.currentWorkerId,
+      photoDir: () async => Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}task-photos'),
+      sendNow: () async {
+        await syncHost.drainNow();
+      },
+    );
+    final wipe = WorkPlanAccountWipe(repo);
+    controller.addListener(() => wipe.onAppState(controller.state));
+    wipe.onAppState(controller.state);
+    workPlan = WorkPlanServices(api: repo, changed: queueSettled, requests: requests?.api);
+  } catch (e) {
+    debugPrint('My Work unavailable: $e');
+  }
+
   runApp(WorkMateApp(
     controller: controller,
     updates: updates,
@@ -221,5 +252,6 @@ Future<void> main() async {
     onResumed: syncHost.register,
     launches: const ChannelLaunchRequests(),
     requests: requests,
+    workPlan: workPlan,
   ));
 }

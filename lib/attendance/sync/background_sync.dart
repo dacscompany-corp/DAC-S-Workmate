@@ -13,6 +13,9 @@ import '../../net/workmate_http_client.dart';
 import '../../requests/data/request_remote.dart';
 import '../../requests/data/requests_db.dart';
 import '../../requests/sync/request_sync.dart';
+import '../../workplan/data/workplan_db.dart';
+import '../../workplan/data/workplan_remote.dart';
+import '../../workplan/sync/workplan_sync.dart';
 import '../data/attendance_db.dart';
 import '../data/attendance_remote.dart';
 import '../../widget/widget_bridge.dart';
@@ -46,7 +49,7 @@ Future<bool> runBackgroundSync() async {
   // Nothing to send: never touch auth (a needless refresh can burn a rotating token).
   final probe = await openDeviceAttendanceDb(singleInstance: false);
   try {
-    if (!await probe.hasAnySendable() && !await _requestsWaiting()) return true;
+    if (!await probe.hasAnySendable() && !await _requestsWaiting() && !await _workPlanWaiting()) return true;
   } finally {
     await probe.close();
   }
@@ -76,16 +79,33 @@ Future<bool> _requestsWaiting() async {
   }
 }
 
+/// My Work actions waiting to be sent. False when its database cannot be
+/// read: a My Work problem must never stop attendance from going out.
+Future<bool> _workPlanWaiting() async {
+  try {
+    final db = await openDeviceWorkPlanDb(singleInstance: false);
+    try {
+      return await db.hasAnySendable();
+    } finally {
+      await db.close();
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Refresh the session if needed, then drain this worker's queues: attendance
-/// first, then requests (0085). Shared by the background isolate and the live
+/// first, then requests (0085), then My Work (0093). Shared by the background isolate and the live
 /// app's [AttendanceSyncHost]. [afterChange] (the widget and Home) runs as soon
 /// as the ATTENDANCE drain settled a row, with its own database — never held
 /// back by request photo uploads. [onRequestsSettled] runs when the requests
 /// drain settled one: it only tells the screens (the widget shows no requests).
+/// [onWorkPlanSettled] likewise for My Work.
 Future<bool> syncWith(
   SupabaseClient client, {
   Future<void> Function(AttendanceDb db, String workerId)? afterChange,
   FutureOr<void> Function()? onRequestsSettled,
+  FutureOr<void> Function()? onWorkPlanSettled,
 }) async {
   // The stored session may be expired: join (or start) its refresh before sending.
   try {
@@ -119,9 +139,20 @@ Future<bool> syncWith(
           await requestsDb.close();
         }
       },
+      workPlan: () async {
+        final workDb = await openDeviceWorkPlanDb(singleInstance: false);
+        try {
+          final work = WorkPlanSync(db: workDb, remote: SupabaseWorkPlanRemote(client));
+          final result = await work.drain(workerId);
+          return (result: result, settled: work.settled);
+        } finally {
+          await workDb.close();
+        }
+      },
       attendanceWaiting: () async => workerId.isNotEmpty && (await db.sendable(workerId)).isNotEmpty,
       afterAttendance: afterChange == null ? null : () => afterChange(db, workerId),
       onRequestsSettled: onRequestsSettled,
+      onWorkPlanSettled: onWorkPlanSettled,
     );
   } finally {
     await db.close();
@@ -135,7 +166,8 @@ typedef DrainOutcome = ({SyncResult result, int settled});
 /// 1. attendance, and at once [afterAttendance] if it settled a row;
 /// 2. requests — any failure, even opening its database, only asks WorkManager
 ///    to come back; it never fails or blocks attendance — then
-///    [onRequestsSettled] if they settled one;
+///    [onRequestsSettled] if they settled one; then My Work ([workPlan]) the
+///    same way, then [onWorkPlanSettled];
 /// 3. attendance ONCE more when a row is waiting again: a Time In queued while
 ///    request photos uploaded goes now, not at the next sweep.
 /// An attendance failure propagates exactly as before (the caller retries).
@@ -144,8 +176,10 @@ Future<bool> drainInOrder({
   required Future<DrainOutcome> Function() attendance,
   required Future<DrainOutcome> Function() requests,
   required Future<bool> Function() attendanceWaiting,
+  Future<DrainOutcome> Function()? workPlan,
   Future<void> Function()? afterAttendance,
   FutureOr<void> Function()? onRequestsSettled,
+  FutureOr<void> Function()? onWorkPlanSettled,
 }) async {
   var att = await attendance();
   if (att.settled > 0) await _tell(afterAttendance);
@@ -158,12 +192,22 @@ Future<bool> drainInOrder({
   }
   if (req.settled > 0) await _tell(onRequestsSettled);
 
+  DrainOutcome work = (result: SyncResult.done, settled: 0);
+  if (workPlan != null) {
+    try {
+      work = await workPlan();
+    } catch (_) {
+      work = (result: SyncResult.retry, settled: 0);
+    }
+  }
+  if (work.settled > 0) await _tell(onWorkPlanSettled);
+
   // A pass that must retry would only fail again: WorkManager comes back.
   if (att.result == SyncResult.done && await _waiting(attendanceWaiting)) {
     att = await attendance();
     if (att.settled > 0) await _tell(afterAttendance);
   }
-  return att.result == SyncResult.done && req.result == SyncResult.done;
+  return att.result == SyncResult.done && req.result == SyncResult.done && work.result == SyncResult.done;
 }
 
 /// The rows are sent; telling the widget and the screens is best effort.

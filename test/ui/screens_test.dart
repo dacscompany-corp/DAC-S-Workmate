@@ -17,10 +17,12 @@ import 'package:workmate/ui/login_screen.dart';
 import 'package:workmate/ui/terms_screen.dart';
 import 'package:workmate/ui/theme.dart';
 import 'package:workmate/widget/start_flow.dart';
+import 'package:workmate/workplan/workplan_services.dart';
 
 import '../attendance/fakes.dart';
 import '../requests/domain/request_models_test.dart' show requestDoc;
 import '../requests/request_fakes.dart';
+import '../workplan/workplan_fakes.dart';
 
 Widget wrap(Widget w) => MaterialApp(theme: workMateTheme(), home: w);
 
@@ -198,5 +200,30 @@ void main() {
     await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
     expect(find.text('My attendance'), findsOneWidget);
+  });
+
+  testWidgets('with My Work: a My Work tab with a number, and the Home card opens it', (tester) async {
+    useTallPhone(tester);
+    final work = FakeWorkPlanApi()..view = viewWithUnread();
+    await tester.pumpWidget(wrap(HomeShell(
+      worker: const WorkerProfile(id: 'u1', displayName: 'Juan dela Cruz', position: 'Mason', workerNo: 42),
+      versionName: '0.6.0',
+      onSignOut: () async {},
+      services: fakeServices(),
+      account: AccountServices(changePassword: (_) async {}, termsAcceptedAt: () async => null),
+      requests: RequestsServices(api: FakeRequestsApi(), takePhoto: (_) async => null),
+      workPlan: WorkPlanServices(api: work, takePhoto: (_) async => null),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('My Work'), findsWidgets);
+    expect(find.text('1 task to read'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('my-work-badge')), matching: find.text('1')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('my-work-card')));
+    await tester.pumpAndSettle();
+    expect(find.text('TODAY · 1'), findsOneWidget);
+    // Requests still has its own tab.
+    await tester.tap(find.text('Requests').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('new-request')), findsOneWidget);
   });
 }
