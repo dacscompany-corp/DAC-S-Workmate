@@ -125,6 +125,40 @@ void main() {
       expect(failed, isFalse, reason: 'WorkManager comes back for My Work');
     });
 
+    test('2A-3b: purchases drain after My Work; their failure only asks WorkManager to come back', () async {
+      final log = <String>[];
+      final ok = await drainInOrder(
+        attendance: () async => (result: SyncResult.done, settled: 0),
+        requests: () async => (result: SyncResult.done, settled: 0),
+        workPlan: () async {
+          log.add('workPlan');
+          return (result: SyncResult.done, settled: 0);
+        },
+        purchases: () async {
+          log.add('purchases');
+          return (result: SyncResult.done, settled: 1);
+        },
+        attendanceWaiting: () async => false,
+        onPurchasesSettled: () => log.add('onPurchasesSettled'),
+      );
+      expect(ok, isTrue);
+      expect(log, ['workPlan', 'purchases', 'onPurchasesSettled']);
+      final failed = await drainInOrder(
+        attendance: () async => (result: SyncResult.done, settled: 1),
+        requests: () async => (result: SyncResult.done, settled: 0),
+        purchases: () async => throw StateError('purchasing db broken'),
+        attendanceWaiting: () async => false,
+      );
+      expect(failed, isFalse, reason: 'WorkManager comes back for the purchases');
+      final retry = await drainInOrder(
+        attendance: () async => (result: SyncResult.done, settled: 0),
+        requests: () async => (result: SyncResult.done, settled: 0),
+        purchases: () async => (result: SyncResult.retry, settled: 0),
+        attendanceWaiting: () async => false,
+      );
+      expect(retry, isFalse);
+    });
+
     test('a failing screen notice changes nothing', () async {
       final result = await drainInOrder(
         attendance: () async => (result: SyncResult.done, settled: 1),

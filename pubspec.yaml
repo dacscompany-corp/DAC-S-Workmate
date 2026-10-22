@@ -1,7 +1,7 @@
 name: workmate
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.6.0+1006
+version: 0.7.1+1008
 
 environment:
   sdk: ^3.10.8
@@ -14,6 +14,9 @@ dependencies:
     sdk: flutter
   flutter_secure_storage: 11.2.0
   http: 1.6.0
+  # Receipt photos from the gallery (2A-3b, Q8). Pinned: its Android side
+  # needs the same Gradle plugin as camera_android_camerax, nothing newer.
+  image_picker: 1.2.1
   package_info_plus: 10.2.1
   path_provider: 2.1.6
   permission_handler: 12.0.1

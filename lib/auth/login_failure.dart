@@ -11,6 +11,10 @@ enum LoginFailure {
   wrongCredentials('That email and password do not match.', 'Hindi tugma ang email at password.'),
   accountInactive('This account is turned off. Call the office.', 'Naka-off ang account na ito. Tawagan ang opisina.'),
   notAWorker('This is not a worker account.', 'Hindi ito worker account.'),
+
+  /// 2A-3a R1: WorkMate refuses an account that is neither a worker nor a buyer.
+  noWorkMateAccess('This account has no WorkMate access. Call the office.',
+      'Walang WorkMate access ang account na ito. Tawagan ang opisina.'),
   tooManyAttempts('Too many tries. Wait a minute, then try again.', 'Sobrang dami nang subok. Maghintay ng isang minuto.'),
   noConnection('No signal right now. Try again in a moment.', 'Walang signal ngayon. Subukan ulit mamaya.'),
   serverProblem('Something went wrong. Try again.', 'May nasira. Subukan ulit.');
@@ -24,6 +28,7 @@ enum LoginFailure {
   static LoginFailure forCode(String? code) => switch (code) {
         'INVALID_CREDENTIALS' => wrongCredentials,
         'NOT_A_WORKER' => notAWorker,
+        'NO_WORKMATE_ACCESS' => noWorkMateAccess,
         'ACCOUNT_INACTIVE' => accountInactive,
         'TOO_MANY_ATTEMPTS' => tooManyAttempts,
         // An unknown code means the function and the app drifted apart.

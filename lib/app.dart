@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'app_controller.dart';
 import 'attendance/attendance_services.dart';
 import 'profile/account_services.dart';
+import 'purchasing/purchasing_services.dart';
+import 'purchasing/ui/buyer_shell.dart';
+import 'purchasing/ui/buying_off_screen.dart';
 import 'requests/requests_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
@@ -29,6 +32,7 @@ class WorkMateApp extends StatefulWidget {
     this.launches,
     this.requests,
     this.workPlan,
+    this.purchasing,
   });
 
   final AppController controller;
@@ -53,6 +57,9 @@ class WorkMateApp extends StatefulWidget {
 
   /// The My Work tab (Stage 1c); null in tests that do not need it.
   final WorkPlanServices? workPlan;
+
+  /// A buyer's screens (Stage 2A-3b); null in tests that do not need them.
+  final PurchasingServices? purchasing;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -134,6 +141,25 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   startRequests: _inbox,
                   requests: widget.requests,
                   workPlan: widget.workPlan,
+                ),
+              BuyerReady(:final worker) => BuyerShell(
+                  buyer: worker,
+                  versionName: widget.versionName,
+                  onSignOut: c.signOut,
+                  account: widget.account,
+                  purchasing: widget.purchasing,
+                ),
+              BuyingOff(:final worker) => FutureBuilder<int>(
+                  future: widget.purchasing?.api.unsentFor(worker.id) ?? Future.value(0),
+                  builder: (context, unsent) =>
+                      BuyingOffScreen(onRetry: c.retryStartup, onSignOut: c.signOut, unsent: unsent.data ?? 0),
+                ),
+              BuyerUnavailable() => GateUnavailableScreen(
+                  onRetry: c.retryStartup,
+                  onSignOut: c.signOut,
+                  title: 'Buying',
+                  english: 'Connect to the internet once so WorkMate can check your account.',
+                  tagalog: 'Kumonekta muna sa internet para ma-check ng WorkMate ang account mo.',
                 ),
             };
             final update = c.requiredUpdate;

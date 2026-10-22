@@ -7,9 +7,12 @@ import '../../attendance/ui/attendance_copy.dart';
 import '../../ui/theme.dart';
 
 /// A photo of the item being requested: BACK camera, no overlay, no caption.
-/// Pops the raw capture's path (the repository files it), or nothing.
+/// Pops the raw capture's path (the repository files it), or nothing. Also a
+/// receipt photo (2A-3b), with its own [title].
 class RequestCameraScreen extends StatefulWidget {
-  const RequestCameraScreen({super.key});
+  const RequestCameraScreen({super.key, this.title = 'Photo of the item'});
+
+  final String title;
 
   @override
   State<RequestCameraScreen> createState() => _RequestCameraScreenState();
@@ -117,7 +120,7 @@ class _RequestCameraScreenState extends State<RequestCameraScreen> with WidgetsB
       appBar: AppBar(
         backgroundColor: WmColors.previewBackdrop,
         foregroundColor: Colors.white,
-        title: const Text('Photo of the item'),
+        title: Text(widget.title),
       ),
       body: Column(children: [
         Expanded(

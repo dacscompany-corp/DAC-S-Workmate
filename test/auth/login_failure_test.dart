@@ -12,6 +12,9 @@ void main() {
     expect(LoginFailure.forCode('NOT_A_WORKER'), LoginFailure.notAWorker);
     expect(LoginFailure.forCode('ACCOUNT_INACTIVE'), LoginFailure.accountInactive);
     expect(LoginFailure.forCode('TOO_MANY_ATTEMPTS'), LoginFailure.tooManyAttempts);
+    // 2A-3a R1: WorkMate's refusal of an account that is neither worker nor buyer.
+    expect(LoginFailure.forCode('NO_WORKMATE_ACCESS'), LoginFailure.noWorkMateAccess);
+    expect(LoginFailure.noWorkMateAccess.english, 'This account has no WorkMate access. Call the office.');
   });
 
   test('an unknown code is our problem, not the worker\'s password', () {

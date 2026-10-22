@@ -10,6 +10,9 @@ import '../../auth/session_storage.dart';
 import '../../net/supabase_setup.dart';
 import '../../net/update_nudges.dart';
 import '../../net/workmate_http_client.dart';
+import '../../purchasing/data/purchasing_db.dart';
+import '../../purchasing/data/purchasing_remote.dart';
+import '../../purchasing/sync/purchasing_sync.dart';
 import '../../requests/data/request_remote.dart';
 import '../../requests/data/requests_db.dart';
 import '../../requests/sync/request_sync.dart';
@@ -49,7 +52,9 @@ Future<bool> runBackgroundSync() async {
   // Nothing to send: never touch auth (a needless refresh can burn a rotating token).
   final probe = await openDeviceAttendanceDb(singleInstance: false);
   try {
-    if (!await probe.hasAnySendable() && !await _requestsWaiting() && !await _workPlanWaiting()) return true;
+    if (!await probe.hasAnySendable() && !await _requestsWaiting() && !await _workPlanWaiting() && !await _purchasesWaiting()) {
+      return true;
+    }
   } finally {
     await probe.close();
   }
@@ -94,18 +99,35 @@ Future<bool> _workPlanWaiting() async {
   }
 }
 
+/// Purchases waiting to be recorded (2A-3b). False when the purchasing
+/// database cannot be read: it must never stop attendance from going out.
+Future<bool> _purchasesWaiting() async {
+  try {
+    final db = await openDevicePurchasingDb(singleInstance: false);
+    try {
+      return await db.hasAnySendable();
+    } finally {
+      await db.close();
+    }
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Refresh the session if needed, then drain this worker's queues: attendance
 /// first, then requests (0085), then My Work (0093). Shared by the background isolate and the live
 /// app's [AttendanceSyncHost]. [afterChange] (the widget and Home) runs as soon
 /// as the ATTENDANCE drain settled a row, with its own database — never held
 /// back by request photo uploads. [onRequestsSettled] runs when the requests
 /// drain settled one: it only tells the screens (the widget shows no requests).
-/// [onWorkPlanSettled] likewise for My Work.
+/// [onWorkPlanSettled] likewise for My Work, [onPurchasesSettled] for a
+/// buyer's purchases (2A-3b).
 Future<bool> syncWith(
   SupabaseClient client, {
   Future<void> Function(AttendanceDb db, String workerId)? afterChange,
   FutureOr<void> Function()? onRequestsSettled,
   FutureOr<void> Function()? onWorkPlanSettled,
+  FutureOr<void> Function()? onPurchasesSettled,
 }) async {
   // The stored session may be expired: join (or start) its refresh before sending.
   try {
@@ -149,10 +171,21 @@ Future<bool> syncWith(
           await workDb.close();
         }
       },
+      purchases: () async {
+        final purDb = await openDevicePurchasingDb(singleInstance: false);
+        try {
+          final purchases = PurchasingSync(db: purDb, remote: SupabasePurchasingRemote(client));
+          final result = await purchases.drain(workerId);
+          return (result: result, settled: purchases.settled);
+        } finally {
+          await purDb.close();
+        }
+      },
       attendanceWaiting: () async => workerId.isNotEmpty && (await db.sendable(workerId)).isNotEmpty,
       afterAttendance: afterChange == null ? null : () => afterChange(db, workerId),
       onRequestsSettled: onRequestsSettled,
       onWorkPlanSettled: onWorkPlanSettled,
+      onPurchasesSettled: onPurchasesSettled,
     );
   } finally {
     await db.close();
@@ -177,9 +210,11 @@ Future<bool> drainInOrder({
   required Future<DrainOutcome> Function() requests,
   required Future<bool> Function() attendanceWaiting,
   Future<DrainOutcome> Function()? workPlan,
+  Future<DrainOutcome> Function()? purchases,
   Future<void> Function()? afterAttendance,
   FutureOr<void> Function()? onRequestsSettled,
   FutureOr<void> Function()? onWorkPlanSettled,
+  FutureOr<void> Function()? onPurchasesSettled,
 }) async {
   var att = await attendance();
   if (att.settled > 0) await _tell(afterAttendance);
@@ -202,12 +237,26 @@ Future<bool> drainInOrder({
   }
   if (work.settled > 0) await _tell(onWorkPlanSettled);
 
+  // A buyer's purchases (2A-3b), the same way: never blocks attendance.
+  DrainOutcome pur = (result: SyncResult.done, settled: 0);
+  if (purchases != null) {
+    try {
+      pur = await purchases();
+    } catch (_) {
+      pur = (result: SyncResult.retry, settled: 0);
+    }
+  }
+  if (pur.settled > 0) await _tell(onPurchasesSettled);
+
   // A pass that must retry would only fail again: WorkManager comes back.
   if (att.result == SyncResult.done && await _waiting(attendanceWaiting)) {
     att = await attendance();
     if (att.settled > 0) await _tell(afterAttendance);
   }
-  return att.result == SyncResult.done && req.result == SyncResult.done && work.result == SyncResult.done;
+  return att.result == SyncResult.done &&
+      req.result == SyncResult.done &&
+      work.result == SyncResult.done &&
+      pur.result == SyncResult.done;
 }
 
 /// The rows are sent; telling the widget and the screens is best effort.

@@ -10,7 +10,8 @@ import 'account_services.dart';
 import 'change_password_sheet.dart';
 
 /// Profile: who is signed in, the password, the Terms they accepted, Log out.
-/// Ported from DACS Attendance's ProfileScreen.
+/// Ported from DACS Attendance's ProfileScreen. A buyer (2A-3b) has no
+/// worker ID and accepted no Attendance Terms (Q23): neither row is shown.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
@@ -18,12 +19,14 @@ class ProfileScreen extends StatefulWidget {
     required this.versionName,
     required this.onSignOut,
     required this.account,
+    this.buyer = false,
   });
 
   final WorkerProfile worker;
   final String versionName;
   final Future<void> Function() onSignOut;
   final AccountServices account;
+  final bool buyer;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -35,7 +38,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAcceptedAt();
+    if (!widget.buyer) _loadAcceptedAt();
   }
 
   Future<void> _loadAcceptedAt() async {
@@ -69,14 +72,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return ListView(padding: const EdgeInsets.all(20), children: [
       const Text('Profile', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 23)),
       const SizedBox(height: 16),
-      WorkerHeader(worker: w),
+      WorkerHeader(worker: w, subtitle: widget.buyer ? 'Buyer' : null),
       const SizedBox(height: 10),
       const Align(alignment: Alignment.centerLeft, child: StatusPill.green('Active account')),
       const SizedBox(height: 18),
       _Card(children: [
         _InfoRow(label: 'Email', value: w.email ?? '--'),
-        _InfoRow(label: 'Position', value: position == null || position.isEmpty ? '--' : position),
-        _InfoRow(label: 'Worker ID', value: w.workerIdLabel),
+        if (widget.buyer) const _InfoRow(label: 'Role', value: 'Buyer'),
+        if (!widget.buyer) _InfoRow(label: 'Position', value: position == null || position.isEmpty ? '--' : position),
+        if (!widget.buyer) _InfoRow(label: 'Worker ID', value: w.workerIdLabel),
       ]),
       const SizedBox(height: 14),
       _Card(children: [
@@ -87,13 +91,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           subtitle: 'Update your login',
           onTap: _changePassword,
         ),
-        _ActionRow(
-          key: const Key('profile-terms'),
-          icon: Icons.description_outlined,
-          title: 'Terms & Conditions',
-          subtitle: at == null ? 'Read the terms you accepted' : 'Accepted ${shortDate(at)}',
-          onTap: _openTerms,
-        ),
+        if (!widget.buyer)
+          _ActionRow(
+            key: const Key('profile-terms'),
+            icon: Icons.description_outlined,
+            title: 'Terms & Conditions',
+            subtitle: at == null ? 'Read the terms you accepted' : 'Accepted ${shortDate(at)}',
+            onTap: _openTerms,
+          ),
       ]),
       const SizedBox(height: 24),
       OutlinedButton.icon(onPressed: widget.onSignOut, icon: const Icon(Icons.logout), label: const Text('Log out')),

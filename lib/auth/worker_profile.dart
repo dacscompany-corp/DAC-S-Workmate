@@ -81,4 +81,10 @@ class WorkerProfile {
       ].join(' · ');
 
   Eligibility eligibility() => eligibilityOf(role, status);
+
+  /// A worker or team leader; anyone else in WorkMate is a buyer (2A-3a).
+  bool get isWorker => _workerRoles.contains(role);
+
+  /// SQL's coalesce(status, 'active').
+  bool get isActive => (status ?? 'active') == 'active';
 }

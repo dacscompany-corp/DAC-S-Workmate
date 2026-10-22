@@ -11,6 +11,7 @@ import 'package:workmate/auth/session_gate.dart';
 import 'package:workmate/auth/sign_in_api.dart';
 import 'package:workmate/auth/worker_cache.dart';
 import 'package:workmate/auth/worker_profile.dart';
+import 'package:workmate/auth/workmate_access.dart';
 
 class FakeBackend implements AuthBackend {
   SessionPresence presenceValue = SessionPresence.absent;
@@ -73,8 +74,9 @@ void main() {
 
     test('success adopts the session and remembers the worker for the first offline launch', () async {
       final repo = AuthRepository(api: apiReturning(200, okBody), backend: backend, cache: cache);
-      final w = await repo.signIn('juan@x.com', 'pw');
-      expect(w.id, 'u1');
+      final signedIn = await repo.signIn('juan@x.com', 'pw');
+      expect(signedIn.worker.id, 'u1');
+      expect(signedIn.access, WorkMateAccess.worker);
       expect(backend.adoptedRefresh, 'R');
       expect(cache.lastSignedInId, 'u1');
     });

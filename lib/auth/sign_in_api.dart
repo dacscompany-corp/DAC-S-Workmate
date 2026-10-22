@@ -4,14 +4,23 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import 'worker_profile.dart';
+import 'workmate_access.dart';
 
 sealed class SignInOutcome {}
 
 class SignInSuccess extends SignInOutcome {
-  SignInSuccess({required this.accessToken, required this.refreshToken, required this.worker});
+  SignInSuccess({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.worker,
+    this.access = WorkMateAccess.worker,
+  });
   final String accessToken;
   final String refreshToken;
   final WorkerProfile worker;
+
+  /// What the function let this account in as (2A-3a R1).
+  final WorkMateAccess access;
 }
 
 class SignInRefused extends SignInOutcome {
@@ -48,6 +57,7 @@ class SignInApi {
         accessToken: session['access_token'] as String,
         refreshToken: session['refresh_token'] as String,
         worker: WorkerProfile.fromRow(body['worker'] as Map<String, dynamic>),
+        access: WorkMateAccess.parse(body['access']),
       );
     }
     // A body we cannot parse is still a refusal, never a network problem.

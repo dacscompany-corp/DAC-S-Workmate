@@ -12,8 +12,11 @@ import 'package:workmate/auth/login_failure.dart';
 import 'package:workmate/auth/session_gate.dart';
 import 'package:workmate/auth/sign_in_api.dart';
 import 'package:workmate/auth/worker_cache.dart';
+import 'package:workmate/purchasing/buyer_access.dart';
 import 'package:workmate/terms/terms_repository.dart';
 import 'package:workmate/update/app_update_repository.dart';
+
+import 'purchasing/buyer_access_test.dart' show FakeBuyerBackend;
 
 class ExplodingCache extends WorkerCache {
   ExplodingCache(super.prefs);
@@ -211,5 +214,141 @@ void main() {
     final c = await build();
     await c.start();
     expect((c.state as SignedOut).notice, LoginFailure.notAWorker);
+  });
+
+  group('2A-3b buyers', () {
+    late FakeBuyerBackend buyerBackend;
+    late BuyerAccess buyers;
+    const buyerBody =
+        '{"session":{"access_token":"A","refresh_token":"R"},"worker":{"id":"s1","role":"staff","status":"active"},"access":"buyer"}';
+
+    Future<AppController> buildWithBuyers({String signInBody = buyerBody, int signInStatus = 200}) async {
+      final prefs = await SharedPreferences.getInstance();
+      final cache = WorkerCache(prefs);
+      buyers = BuyerAccess(backend: buyerBackend, prefs: prefs);
+      return AppController(
+        auth: AuthRepository(
+            api: SignInApi(MockClient((_) async => http.Response(signInBody, signInStatus))), backend: authBackend, cache: cache),
+        terms: TermsRepository(backend: termsBackend, cache: cache, userAgent: 'test'),
+        updates: AppUpdateRepository(
+            source: source, prefs: prefs, installedVersionCode: 1000,
+            download: MockClient((_) async => http.Response('', 404)), cacheDir: () async => Directory.systemTemp),
+        nudges: nudges.stream,
+        buyers: buyers,
+      );
+    }
+
+    setUp(() => buyerBackend = FakeBuyerBackend());
+
+    test('sign-in as a buyer: straight to the buyer app, never the Attendance Terms (Q23)', () async {
+      termsBackend.versions = {};
+      final c = await buildWithBuyers();
+      await c.start();
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      expect(await c.signIn('staff@x.com', 'pw'), isNull);
+      expect(c.state, isA<BuyerReady>());
+    });
+
+    test('sign-in as a buyer with no signal right after: still let in (the function said buyer)', () async {
+      buyerBackend.offline = true;
+      final c = await buildWithBuyers();
+      await c.start();
+      expect(await c.signIn('staff@x.com', 'pw'), isNull);
+      expect(c.state, isA<BuyerReady>());
+    });
+
+    test('restored buyer session: the server is asked again (Q1 startup re-check)', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      final c = await buildWithBuyers();
+      await c.start();
+      expect(c.state, isA<BuyerReady>());
+      expect(buyerBackend.asked, 1);
+    });
+
+    test('the switch was turned off since: Buying is turned off (R2), nobody is signed out', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      final c = await buildWithBuyers();
+      await c.start();
+      buyerBackend.answer = const BuyerStatus(canBuy: false, companyId: 'o1');
+      await c.retryStartup();
+      expect(c.state, isA<BuyingOff>());
+      expect(authBackend.signedOut, isFalse);
+      // Turned back on: TRY AGAIN lets them in.
+      buyerBackend.answer = const BuyerStatus(canBuy: true, companyId: 'o1');
+      await c.retryStartup();
+      expect(c.state, isA<BuyerReady>());
+    });
+
+    test('an office account never a buyer here: signed out, "no WorkMate access"', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 'a1', 'role': 'admin', 'status': 'active'};
+      buyerBackend.answer = const BuyerStatus(canBuy: false, companyId: 'a1');
+      final c = await buildWithBuyers();
+      await c.start();
+      expect((c.state as SignedOut).notice, LoginFailure.noWorkMateAccess);
+      expect(authBackend.signedOut, isTrue);
+    });
+
+    test('a deactivated buyer is told so and signed out', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'inactive'};
+      final c = await buildWithBuyers();
+      await c.start();
+      expect((c.state as SignedOut).notice, LoginFailure.accountInactive);
+      expect(buyerBackend.asked, 0);
+    });
+
+    test('first launch offline with nothing known: cannot be checked, never assumed', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      buyerBackend.offline = true;
+      final c = await buildWithBuyers();
+      await c.start();
+      expect(c.state, isA<BuyerUnavailable>());
+    });
+
+    test('a buying screen refused BUYER_REQUIRED: Buying is turned off at once', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      final c = await buildWithBuyers();
+      await c.start();
+      await c.buyingTurnedOff();
+      expect(c.state, isA<BuyingOff>());
+      buyerBackend.offline = true;
+      await c.retryStartup();
+      expect(c.state, isA<BuyingOff>(), reason: 'offline, the last answer (off) stands');
+    });
+
+    test('log out forgets the buyer: nothing about them outlives it', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 's1', 'role': 'staff', 'status': 'active'};
+      final c = await buildWithBuyers();
+      await c.start();
+      await c.signOut();
+      expect(c.state, isA<SignedOut>());
+      expect(buyers.companyOf('s1'), isNull);
+    });
+
+    test('workers are unaffected: the Terms gate still applies, the buyer check is never asked', () async {
+      authBackend
+        ..p = SessionPresence.confirmed
+        ..row = {'id': 'u1', 'role': 'worker', 'status': 'active'};
+      termsBackend.versions = {};
+      final c = await buildWithBuyers();
+      await c.start();
+      expect(c.state, isA<NeedsTerms>());
+      expect(buyerBackend.asked, 0);
+    });
   });
 }

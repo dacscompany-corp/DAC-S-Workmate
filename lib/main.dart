@@ -37,6 +37,12 @@ import 'net/supabase_setup.dart';
 import 'net/update_nudges.dart';
 import 'net/workmate_http_client.dart';
 import 'profile/account_services.dart';
+import 'purchasing/buyer_access.dart';
+import 'purchasing/data/purchasing_account_wipe.dart';
+import 'purchasing/data/purchasing_db.dart';
+import 'purchasing/data/purchasing_remote.dart';
+import 'purchasing/data/purchasing_repository.dart';
+import 'purchasing/purchasing_services.dart';
 import 'requests/data/request_remote.dart';
 import 'requests/data/request_repository.dart';
 import 'requests/data/requests_db.dart';
@@ -94,9 +100,10 @@ Future<void> main() async {
         await widgets.publishIfCurrent(db, workerId, () => letInWorker());
         queueSettled.fire();
       },
-      // Requests and My Work are not on the widget: only the screens are told.
+      // Requests, My Work and purchases are not on the widget: only the screens are told.
       onRequestsSettled: queueSettled.fire,
       onWorkPlanSettled: queueSettled.fire,
+      onPurchasesSettled: queueSettled.fire,
     ),
   )..register();
 
@@ -137,7 +144,9 @@ Future<void> main() async {
   letInWorker = attendance.currentWorkerId;
   final auth = AuthRepository(api: SignInApi(httpClient), backend: SupabaseAuthBackend(client, sessionStorage), cache: cache);
   final terms = TermsRepository(backend: SupabaseTermsBackend(client), cache: cache, userAgent: userAgent);
-  controller = AppController(auth: auth, terms: terms, updates: updates, nudges: nudges.events);
+  // 2A-3b: office accounts that may buy (the server's pur_buyer() rule).
+  final buyers = BuyerAccess(backend: SupabaseBuyerAccessBackend(client), prefs: prefs);
+  controller = AppController(auth: auth, terms: terms, updates: updates, nudges: nudges.events, buyers: buyers);
   // The home-screen widget follows every change to today, and every sign-in / sign-out.
   Future<void> publishWidget() => widgets.publish(attendance.db, attendance.currentWorkerId());
   final widgetSync = WidgetAppSync(publishWidget);
@@ -242,6 +251,34 @@ Future<void> main() async {
     debugPrint('My Work unavailable: $e');
   }
 
+  // Buying (Stage 2A-3b): office accounts with the Buyer switch. If its
+  // database cannot open, a buyer gets Profile only: workers never depend on it.
+  PurchasingServices? purchasing;
+  try {
+    final repo = PurchasingRepository(
+      db: await openDevicePurchasingDb(),
+      remote: SupabasePurchasingRemote(client),
+      device: device,
+      scheduler: scheduler,
+      currentUserId: () => switch (controller.state) {
+        BuyerReady(:final worker) => worker.id,
+        _ => '',
+      },
+      companyOf: buyers.companyOf,
+      photoDir: () async => Directory('${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}receipt-photos'),
+      sendNow: () async {
+        await syncHost.drainNow();
+      },
+      onBuyingOff: controller.buyingTurnedOff,
+    );
+    final wipe = PurchasingAccountWipe(repo);
+    controller.addListener(() => wipe.onAppState(controller.state));
+    wipe.onAppState(controller.state);
+    purchasing = PurchasingServices(api: repo, changed: queueSettled);
+  } catch (e) {
+    debugPrint('Buying unavailable: $e');
+  }
+
   runApp(WorkMateApp(
     controller: controller,
     updates: updates,
@@ -253,5 +290,6 @@ Future<void> main() async {
     launches: const ChannelLaunchRequests(),
     requests: requests,
     workPlan: workPlan,
+    purchasing: purchasing,
   ));
 }

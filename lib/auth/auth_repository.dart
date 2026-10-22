@@ -4,6 +4,14 @@ import 'session_gate.dart';
 import 'sign_in_api.dart';
 import 'worker_cache.dart';
 import 'worker_profile.dart';
+import 'workmate_access.dart';
+
+/// Who signed in, and what `attendance-signin` let them in as.
+class SignedIn {
+  const SignedIn(this.worker, this.access);
+  final WorkerProfile worker;
+  final WorkMateAccess access;
+}
 
 class LoginRejected implements Exception {
   LoginRejected(this.failure);
@@ -20,8 +28,9 @@ class AuthRepository {
   final WorkerCache cache;
 
   /// The function checks credentials AND eligibility before any token
-  /// exists, so a success is always an active worker.
-  Future<WorkerProfile> signIn(String email, String password) async {
+  /// exists, so a success is always an active worker or (2A-3a) an account
+  /// that may buy.
+  Future<SignedIn> signIn(String email, String password) async {
     final trimmed = email.trim();
     if (trimmed.isEmpty || password.isEmpty) throw LoginRejected(LoginFailure.missingFields);
 
@@ -44,7 +53,7 @@ class AuthRepository {
         // Cached here: sign-in is the one moment there is surely signal, and
         // the FIRST offline launch needs this to not land on the login screen.
         await cache.remember(outcome.worker);
-        return outcome.worker;
+        return SignedIn(outcome.worker, outcome.access);
     }
   }
 
