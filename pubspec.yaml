@@ -1,7 +1,7 @@
 name: workmate
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.7.1+1008
+version: 0.8.0+1009
 
 environment:
   sdk: ^3.10.8

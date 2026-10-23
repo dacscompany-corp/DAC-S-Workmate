@@ -14,12 +14,19 @@ class MyPurchasesController extends ChangeNotifier {
   final PurchasingApi api;
 
   MyPurchasesView view = const MyPurchasesView();
+
+  /// The "My cash" card (0102, Q23): the buyer's own cash, fresh or saved.
+  MyCashView cash = const MyCashView();
   List<PurchaseDraft> drafts = const [];
   bool loading = false;
   Bilingual? notice;
 
-  /// Needs attention: shown as a number on the tab.
-  int get attention => view.queued.where((q) => q.state == QueuedState.needsAttention).length;
+  /// Needs attention: shown as a number on the tab (refused payments and
+  /// returns too: each needs the buyer to look).
+  int get attention =>
+      view.queued.where((q) => q.state == QueuedState.needsAttention).length +
+      view.queuedPayments.where((q) => q.state == QueuedState.needsAttention).length +
+      cash.queuedReturns.where((q) => q.state == QueuedState.needsAttention).length;
 
   Future<void> refresh() async {
     loading = true;
@@ -27,6 +34,11 @@ class MyPurchasesController extends ChangeNotifier {
     try {
       drafts = await api.drafts();
       view = await api.myPurchases();
+      try {
+        cash = await api.myCash();
+      } catch (_) {
+        // The card waits for the first read; the purchases still show.
+      }
     } catch (e) {
       notice = purFailureCopy(PurFailure.of(e));
     } finally {
@@ -44,6 +56,12 @@ class MyPurchasesController extends ChangeNotifier {
 
   Future<void> throwAway(QueuedPurchase q) async {
     await api.discardRefused(q.draft.id);
+    await refresh();
+  }
+
+  /// A refused payment thrown away (with its proof photo).
+  Future<void> throwAwayPayment(QueuedCashAction q) async {
+    await api.discardAction(q.opId);
     await refresh();
   }
 

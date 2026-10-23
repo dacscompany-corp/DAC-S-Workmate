@@ -7,9 +7,12 @@ import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../requests/domain/quantity.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../domain/pay_models.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
 import '../purchasing_services.dart';
+import '../ui/pay_copy.dart';
+import '../ui/pay_widgets.dart';
 import '../ui/purchasing_copy.dart';
 import 'record_controller.dart';
 
@@ -157,6 +160,12 @@ class RecordScreen extends StatelessWidget {
                     color: parseMoney(d.receiptTotal) != null && round2(parseMoney(d.receiptTotal)!) == d.computedTotal ? WmColors.green : WmColors.textSecondary,
                   ),
                 ),
+                const SizedBox(height: 18),
+                _heading('6', 'Paid now?'),
+                const Text('Optional. A payment never changes Spent — it only says how the receipt was paid.',
+                    style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                const SizedBox(height: 8),
+                _PaidNow(controller: c),
                 for (final p in general) ...[const SizedBox(height: 8), _ProblemText(p)],
                 const SizedBox(height: 20),
                 bilingualButton(recordLabel, c.sending ? null : () => _send(context), filled: true, key: const Key('record-send')),
@@ -176,6 +185,87 @@ class RecordScreen extends StatelessWidget {
         ]),
       );
 }
+
+/// "Paid now?" (0102, Q3): the payment made at the counter, recorded with
+/// the purchase in one transaction — both or neither. Later payments go
+/// through Record payment on My purchases.
+class _PaidNow extends StatelessWidget {
+  const _PaidNow({required this.controller});
+  final RecordController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final d = c.draft;
+    final sources = c.paySources;
+    final over = c.overspend;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      DropdownButtonFormField<String>(
+        key: const Key('paid-now'),
+        initialValue: const ['none', 'full', 'part'].contains(d.paidNow) ? d.paidNow : 'none',
+        isExpanded: true,
+        decoration: const InputDecoration(labelText: 'Paid at the counter'),
+        items: [
+          for (final v in const ['none', 'full', 'part'])
+            DropdownMenuItem(value: v, child: Text('${paidNowCopy(v).english} · ${paidNowCopy(v).tagalog}', overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: (v) => c.setPaidNow(v ?? 'none'),
+      ),
+      if (d.paidNow != 'none') ...[
+        if (d.paidNow == 'part') ...[
+          const SizedBox(height: 10),
+          TextFormField(
+            key: const Key('paid-amount'),
+            initialValue: d.paidAmount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount paid now', prefixText: '₱ '),
+            onChanged: c.setPaidAmount,
+          ),
+        ],
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          key: ValueKey('paid-from-${sources.join(',')}'),
+          initialValue: sources.contains(d.paidFrom) ? d.paidFrom : sources.first,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: '${paidFromLabel.english} · ${paidFromLabel.tagalog}'),
+          items: [
+            for (final s in sources) DropdownMenuItem(value: s, child: Text(paySourceCopy(s).english, overflow: TextOverflow.ellipsis)),
+          ],
+          onChanged: (s) => c.setPaidFrom(s ?? 'company'),
+        ),
+        const SizedBox(height: 10),
+        if (d.paidFrom == 'credit')
+          DropdownButtonFormField<String>(
+            key: const Key('paid-credit'),
+            initialValue: c.credits.any((x) => x.id == d.paidCredit) ? d.paidCredit : null,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Credit to use'),
+            items: [
+              for (final x in c.credits)
+                DropdownMenuItem(value: x.id, child: Text('${x.supplier} — ${peso(x.left)} left', overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (id) {
+              if (id != null) c.setPaidCredit(id);
+            },
+          )
+        else
+          DropdownButtonFormField<String>(
+            key: const Key('paid-method'),
+            initialValue: payMethods.contains(d.paidMethod) ? d.paidMethod : 'cash',
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'How'),
+            items: [for (final m in payMethods) DropdownMenuItem(value: m, child: Text(payMethodLabel(m)))],
+            onChanged: (m) => c.setPaidMethod(m ?? 'cash'),
+          ),
+        if (over != null) ...[
+          const SizedBox(height: 10),
+          PayWarning(key: const Key('paid-overspend'), text: overspendCopy(peso(over.held), peso(over.amount))),
+        ],
+      ],
+    ]);
+  }
+}
+
 
 class _ProblemText extends StatelessWidget {
   const _ProblemText(this.problem);

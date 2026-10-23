@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../requests/domain/quantity.dart';
 import '../data/purchasing_api.dart';
+import '../domain/pay_models.dart';
 import '../domain/pur_failure.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
@@ -29,9 +30,18 @@ class RecordController extends ChangeNotifier {
 
   PurchaseChoices? choices;
 
+  /// The buyer's own cash (0102), fresh or the saved copy: what "Paid now?"
+  /// may offer. Null when it was never read (the server then decides).
+  MyCashView? cash;
+
   /// Problems are shown once the buyer has tried to send.
   bool _tried = false;
-  List<PurchaseProblem> get problems => _tried ? purchaseProblems(_draft) : const [];
+  List<PurchaseProblem> get problems => _tried ? _allProblems : const [];
+
+  List<PurchaseProblem> get _allProblems => [
+        ...purchaseProblems(_draft),
+        ...paidNowProblems(_draft, holder: holder, creditLeft: _chosenCredit?.left),
+      ];
 
   bool sending = false;
   Bilingual? notice;
@@ -41,6 +51,11 @@ class RecordController extends ChangeNotifier {
       choices = await api.choices();
     } catch (e) {
       notice = purFailureCopy(PurFailure.of(e));
+    }
+    try {
+      cash = await api.myCash();
+    } catch (_) {
+      // "Paid now?" then offers what any buyer may: company money, petty cash.
     }
     notifyListeners();
   }
@@ -66,10 +81,11 @@ class RecordController extends ChangeNotifier {
 
   void setDate(String iso) => _set(_draft.copyWith(purchaseDate: iso));
 
-  /// A supplier from the list, or (null) one typed by name.
-  void setSupplier(Supplier? s) => _set(_draft.copyWith(supplierId: s?.id, supplierName: s?.label ?? ''));
+  /// A supplier from the list, or (null) one typed by name. Its credits are
+  /// not another supplier's: a credit chosen in "Paid now?" is re-picked.
+  void setSupplier(Supplier? s) => _set(_payFits(_draft.copyWith(supplierId: s?.id, supplierName: s?.label ?? '')));
 
-  void setSupplierName(String name) => _set(_draft.copyWith(supplierId: null, supplierName: name));
+  void setSupplierName(String name) => _set(_payFits(_draft.copyWith(supplierId: null, supplierName: name)));
 
   void setPayment(String method) => _set(_draft.copyWith(paymentMethod: method));
 
@@ -155,7 +171,7 @@ class RecordController extends ChangeNotifier {
   /// form still has problems, now shown.
   Future<bool> send() async {
     _tried = true;
-    if (purchaseProblems(_draft).isNotEmpty || sending) {
+    if (_allProblems.isNotEmpty || sending) {
       notifyListeners();
       return false;
     }
@@ -178,4 +194,70 @@ class RecordController extends ChangeNotifier {
 
   /// Throws the draft away, with its photos.
   Future<void> discard() => api.deleteDraft(_draft);
+
+  // ── "Paid now?" (0102, Q3) ─────────────────────────────────────────────
+
+  /// A staff buyer holds petty cash and may use own money (R2). Unknown
+  /// (never read) counts as yes: the server decides, both or neither.
+  bool get holder => cash?.cash?.holder ?? true;
+
+  /// Q21: own money is offered only while the owner allows it, as last read.
+  bool get ownMoneyAllowed => holder && (cash?.cash?.ownMoney ?? false);
+
+  /// Credits with this purchase's supplier that still have something left.
+  List<SupplierCredit> get credits => cash?.creditsFor(_draft.supplierId) ?? const [];
+
+  SupplierCredit? get _chosenCredit => credits.where((c) => c.id == _draft.paidCredit).firstOrNull;
+
+  /// Where the money may come from (Q5): petty cash and own money for a
+  /// staff buyer, the company always, a supplier credit when there is one.
+  List<String> get paySources => [
+        if (holder) 'petty_cash',
+        if (ownMoneyAllowed) 'own_money',
+        'company',
+        if (credits.isNotEmpty) 'credit',
+      ];
+
+  /// "Not paid yet" / "Paid in full" / "Paid part". The first payment choice
+  /// starts from the first source this account may use — petty cash for a
+  /// staff buyer, as on the web; later changes keep what was picked.
+  void setPaidNow(String v) {
+    var d = _draft.copyWith(paidNow: v);
+    if (v != 'none' && (_draft.paidNow == 'none' || !paySources.contains(d.paidFrom))) d = d.copyWith(paidFrom: paySources.first);
+    _set(_withCredit(d));
+  }
+
+  void setPaidAmount(String v) => _set(_draft.copyWith(paidAmount: v));
+
+  void setPaidFrom(String v) => _set(_withCredit(_draft.copyWith(paidFrom: v)));
+
+  void setPaidMethod(String v) => _set(_draft.copyWith(paidMethod: v));
+
+  void setPaidCredit(String id) => _set(_draft.copyWith(paidCredit: id));
+
+  /// After a supplier change: a credit only from the new supplier's, or
+  /// another source when it has none.
+  PurchaseDraft _payFits(PurchaseDraft d) {
+    final usable = cash?.creditsFor(d.supplierId) ?? const <SupplierCredit>[];
+    if (d.paidFrom != 'credit') return d;
+    if (usable.isEmpty) return d.copyWith(paidFrom: holder ? 'petty_cash' : 'company', paidCredit: null);
+    return usable.any((c) => c.id == d.paidCredit) ? d : d.copyWith(paidCredit: usable.first.id);
+  }
+
+  /// Paying from a credit picks the first usable one unless one is chosen.
+  PurchaseDraft _withCredit(PurchaseDraft d) {
+    if (d.paidFrom != 'credit') return d.copyWith(paidCredit: null);
+    final ok = credits.any((c) => c.id == d.paidCredit);
+    return ok || credits.isEmpty ? d : d.copyWith(paidCredit: credits.first.id);
+  }
+
+  /// Q16: paying more petty cash than is on record (less payments still on
+  /// the phone) — a warning, never a refusal. Null when nothing to say.
+  ({double held, double amount})? get overspend {
+    final pay = paidNowPayment(_draft);
+    final figures = cash?.figures;
+    if (pay == null || pay.source != 'petty_cash' || figures == null) return null;
+    final over = overspendBy(pay.amount, figures.held);
+    return over == null ? null : (held: figures.held, amount: parseMoney(pay.amount) ?? 0);
+  }
 }

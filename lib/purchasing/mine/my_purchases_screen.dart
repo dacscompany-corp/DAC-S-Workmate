@@ -8,6 +8,11 @@ import '../data/purchasing_api.dart';
 import '../domain/pur_failure.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
+import '../pay/my_cash_screen.dart';
+import '../pay/record_payment_screen.dart';
+import '../purchasing_services.dart';
+import '../ui/pay_copy.dart';
+import '../ui/pay_widgets.dart';
 import '../ui/purchasing_copy.dart';
 import 'my_purchases_controller.dart';
 
@@ -22,13 +27,32 @@ List<(String, Color, Color)> purchaseFlags(MyPurchase p) => [
     ];
 
 class MyPurchasesScreen extends StatelessWidget {
-  const MyPurchasesScreen({super.key, required this.controller, required this.onOpenDraft, required this.onOpenPurchase});
+  const MyPurchasesScreen({super.key, required this.controller, required this.onOpenDraft, required this.onOpenPurchase, this.services});
 
   final MyPurchasesController controller;
+
+  /// For Record payment and My cash (0102); none in screens that only list.
+  final PurchasingServices? services;
 
   /// Continue a draft (or a refused purchase sent back to editing).
   final void Function(PurchaseDraft draft) onOpenDraft;
   final void Function(MyPurchase purchase) onOpenPurchase;
+
+  Future<void> _openCash(BuildContext context) async {
+    final s = services;
+    if (s == null) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MyCashScreen(services: s)));
+    await controller.refresh();
+  }
+
+  /// Q6: a later payment — also with no signal; what is left counts payments still on the phone.
+  Future<void> _pay(BuildContext context, MyPurchase p) async {
+    final s = services;
+    if (s == null) return;
+    final queued = await openRecordPayment(context, s,
+        purchaseId: p.id, supplier: p.supplier, supplierId: p.supplierId, left: p.pay.leftAfter(controller.view.unsentFor(p.id)));
+    if (queued) await controller.refresh();
+  }
 
   Future<void> _fix(QueuedPurchase q) async {
     final d = await controller.edit(q);
@@ -58,10 +82,17 @@ class MyPurchasesScreen extends StatelessWidget {
                   style: const TextStyle(color: WmColors.brownDeep, fontWeight: FontWeight.w600),
                 ),
               ],
-              if (v.queued.isNotEmpty) ...[
+              if (services != null) ...[const SizedBox(height: 10), MyCashCard(view: c.cash, onOpen: () => _openCash(context))],
+              if (v.queued.isNotEmpty || v.queuedPayments.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 const BilingualText(Bilingual('Not sent yet', 'Hindi pa naipapadala'), style: monoLabel),
                 for (final q in v.queued) _QueuedCard(q: q, onFix: () => _fix(q), onThrowAway: () => c.throwAway(q)),
+                for (final q in v.queuedPayments)
+                  _QueuedPaymentCard(
+                    q: q,
+                    supplier: v.purchases.where((p) => p.id == q.purchaseId).firstOrNull?.supplier ?? '',
+                    onThrowAway: () => c.throwAwayPayment(q),
+                  ),
               ],
               if (c.drafts.isNotEmpty) ...[
                 const SizedBox(height: 16),
@@ -99,6 +130,7 @@ class MyPurchasesScreen extends StatelessWidget {
                             style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
                         const SizedBox(height: 6),
                         Wrap(spacing: 6, runSpacing: 6, children: [for (final f in purchaseFlags(p)) _Flag(f)]),
+                        if (p.pay.tracked || p.pay.state != 'not_tracked') _PayLine(p: p, unsent: v.unsentFor(p.id), anySent: v.sentFor(p.id), onPay: services == null ? null : () => _pay(context, p)),
                       ]),
                     ),
                   ),
@@ -122,6 +154,77 @@ class _Flag extends StatelessWidget {
       );
 }
 
+/// How a purchase is paid (0102): the state, what is left once payments
+/// still on the phone count (Q6), and Record payment.
+class _PayLine extends StatelessWidget {
+  const _PayLine({required this.p, required this.unsent, this.anySent = false, this.onPay});
+  final MyPurchase p;
+  final double unsent;
+  final bool anySent;
+  final VoidCallback? onPay;
+
+  @override
+  Widget build(BuildContext context) {
+    final left = p.pay.leftAfter(unsent);
+    final words = [
+      if (p.pay.state == 'overpaid') '${peso(p.pay.unresolved)} over — the owner resolves it'
+      else if (p.pay.payable && left > 0) '${peso(left)} left',
+      if (unsent > 0) anySent ? '${peso(unsent)} not in this list yet' : '${peso(unsent)} waiting to send',
+    ].join(' · ');
+    // A phone is narrow: the state and its words on one line, the button under them.
+    return Padding(
+      key: Key('pay-line-${p.id}'),
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          PayPill(p.pay.state),
+          if (words.isNotEmpty) Text(words, style: const TextStyle(fontSize: 12.5, color: WmColors.textSecondary)),
+        ]),
+        if (onPay != null && p.pay.canRecordPayment && !p.voided)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(key: Key('pay-${p.id}'), onPressed: onPay, child: Text(recordPaymentLabel.english)),
+          ),
+      ]),
+    );
+  }
+}
+
+class _QueuedPaymentCard extends StatelessWidget {
+  const _QueuedPaymentCard({required this.q, required this.supplier, required this.onThrowAway});
+  final QueuedCashAction q;
+  final String supplier;
+  final VoidCallback onThrowAway;
+
+  @override
+  Widget build(BuildContext context) {
+    final attention = q.state == QueuedState.needsAttention;
+    final why = attention ? purFailureCopy(q.failure ?? PurFailure.unexpected) : null;
+    return Card(
+      key: Key('queued-pay-${q.opId}'),
+      color: attention ? WmColors.dangerTint : Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text('Payment${supplier.isEmpty ? '' : ' to $supplier'}', style: const TextStyle(fontWeight: FontWeight.w800))),
+            Text(peso(q.amount), style: const TextStyle(fontWeight: FontWeight.w800)),
+          ]),
+          Text(paySourceCopy(q.source).english, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
+          BilingualText(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingToSendPayLabel),
+              style: TextStyle(fontWeight: FontWeight.w700, color: attention ? WmColors.danger : WmColors.brownDeep)),
+          if (why != null) ...[
+            const SizedBox(height: 6),
+            Text(why.english, style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w600)),
+            Text(why.tagalog, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
+            TextButton(key: Key('throw-pay-${q.opId}'), onPressed: onThrowAway, child: const Text('Throw away')),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
 class _QueuedCard extends StatelessWidget {
   const _QueuedCard({required this.q, required this.onFix, required this.onThrowAway});
   final QueuedPurchase q;
@@ -143,7 +246,7 @@ class _QueuedCard extends StatelessWidget {
             Expanded(child: Text(d.supplierName.isEmpty ? 'Purchase on ${d.purchaseDate}' : d.supplierName, style: const TextStyle(fontWeight: FontWeight.w800))),
             Text(peso(parseMoney(d.receiptTotal) ?? 0), style: const TextStyle(fontWeight: FontWeight.w800)),
           ]),
-          BilingualText(attention ? attentionLabel : waitingLabel,
+          BilingualText(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingLabel),
               style: TextStyle(fontWeight: FontWeight.w700, color: attention ? WmColors.danger : WmColors.brownDeep)),
           if (why != null) ...[
             const SizedBox(height: 6),

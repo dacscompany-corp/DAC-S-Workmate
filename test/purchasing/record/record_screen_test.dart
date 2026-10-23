@@ -46,9 +46,16 @@ void main() {
 
   // The form's own list (every text field has a Scrollable of its own), then
   // all of the widget on screen: scrollUntilVisible stops at its first pixel.
+  // A target already built (above the screen as well as below) is brought into view directly.
   Future<void> scrollTo(WidgetTester tester, Finder f, {double step = 200}) async {
-    await tester.scrollUntilVisible(f, step,
-        scrollable: find.descendant(of: find.byKey(const Key('record-form')), matching: find.byType(Scrollable)).first);
+    if (f.evaluate().isEmpty) {
+      final list = find.descendant(of: find.byKey(const Key('record-form')), matching: find.byType(Scrollable)).first;
+      try {
+        await tester.scrollUntilVisible(f, step, scrollable: list);
+      } on StateError {
+        await tester.scrollUntilVisible(f, -step, scrollable: list); // it is above
+      }
+    }
     await tester.ensureVisible(f);
     await tester.pumpAndSettle();
   }

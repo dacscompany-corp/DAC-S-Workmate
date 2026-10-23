@@ -142,7 +142,7 @@ class _BuyerShellState extends State<BuyerShell> with WidgetsBindingObserver {
     if (tabs.length < 2) return Scaffold(body: SafeArea(child: profile));
     final body = switch (_tab) {
       _Tab.shopping => ShoppingListScreen(controller: _shopping!, onRecord: (lines) => _record(lines: lines)),
-      _Tab.mine => MyPurchasesScreen(controller: _mine!, onOpenDraft: (d) => _record(draft: d), onOpenPurchase: _open),
+      _Tab.mine => MyPurchasesScreen(controller: _mine!, onOpenDraft: (d) => _record(draft: d), onOpenPurchase: _open, services: widget.purchasing),
       _Tab.profile => profile,
     };
     return Scaffold(
