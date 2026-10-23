@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
@@ -66,11 +67,49 @@ class FakePurchasingRemote implements PurchasingRemote {
 
   final calls = <String>[];
   final uploads = <String>[];
+
+  /// The ledger kind of each upload, in order (0102: 'petty_cash' for a return's photo).
+  final uploadKinds = <String>[];
   final recorded = <Map<String, dynamic>>[];
   final recordOps = <String>[];
 
+  // 0102: the buyer's cash, the company's credits, one purchase's payments.
+  Map<String, dynamic> cash = {'holder': true, 'recorded': 1470, 'held': 1470, 'shortfall': 0, 'pending_returns': 0, 'owes': 0,
+    'owes_to_review': 0, 'own_money': false, 'issues': [], 'returns': [], 'repayments': []};
+  List<Map<String, dynamic>> creditRows = [];
+  Map<String, dynamic> payments = {'pay': {'state': 'unpaid', 'tracked': true, 'due': 1000, 'balance': 1000}, 'payments': [], 'open_credits': [],
+    'me': {'holder': true, 'own_money': false, 'cash_held': 1470}};
+
+  /// Op ids the server has accepted (pur_my_ops_done answers from these).
+  final accepted = <String>{};
+
+  /// The next pur_pay is accepted but its answer is lost on the way back.
+  bool loseNextAnswer = false;
+
+  /// Thrown by the balance reads only (My purchases, My cash, credits, one
+  /// purchase's payments) while set; pur_my_ops_done still answers (R38).
+  Object? balanceError;
+
+  /// Run inside every balance read while set, before it answers: something
+  /// that happens while the read is under way (the background send).
+  Future<void> Function()? duringRead;
+
+  /// Thrown by pur_my_ops_done only, while set.
+  Object? opsDoneError;
+
+  /// pur_pay / pur_cash_report_return bodies, in order, with their op ids.
+  final paid = <Map<String, dynamic>>[];
+  final returned = <Map<String, dynamic>>[];
+
   void _read() {
     if (readError != null) throw readError!;
+  }
+
+  Future<void> _balance() async {
+    _read();
+    if (balanceError != null) throw balanceError!;
+    final f = duringRead;
+    if (f != null) await f();
   }
 
   void _write() {
@@ -127,7 +166,7 @@ class FakePurchasingRemote implements PurchasingRemote {
 
   @override
   Future<List<Map<String, dynamic>>> myPurchases() async {
-    _read();
+    await _balance();
     return mine;
   }
 
@@ -142,6 +181,7 @@ class FakePurchasingRemote implements PurchasingRemote {
     calls.add('record:$opId');
     _write();
     recordOps.add(opId);
+    accepted.add(opId);
     recorded.add(body);
     return {'purchase_id': 'pu${recorded.length}'};
   }
@@ -164,14 +204,89 @@ class FakePurchasingRemote implements PurchasingRemote {
   }
 
   @override
-  Future<String> uploadReceipt({required String path, required String localPath, required String companyId, required String userId}) async {
+  Future<String> uploadReceipt(
+      {required String path, required String localPath, required String companyId, required String userId, String kind = 'purchase'}) async {
     final e = uploadError;
     if (e != null) {
       uploadError = null;
       throw e;
     }
     uploads.add(path);
+    uploadKinds.add(kind);
     return 'https://x.supabase.co/storage/v1/object/public/uploads/$path';
+  }
+
+  @override
+  Future<Map<String, dynamic>> myCash() async {
+    await _balance();
+    calls.add('myCash');
+    return cash;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> credits() async {
+    _read();
+    if (balanceError != null) throw balanceError!;
+    return creditRows;
+  }
+
+  @override
+  Future<List<String>> opsDone(List<String> opIds) async {
+    _read();
+    if (opsDoneError != null) throw opsDoneError!;
+    calls.add('opsDone:${opIds.length}');
+    return [for (final id in opIds) if (accepted.contains(id)) id];
+  }
+
+  @override
+  Future<Map<String, dynamic>> purchasePayments(String purchaseId) async {
+    await _balance();
+    calls.add('payments:$purchaseId');
+    return payments;
+  }
+
+  @override
+  Future<Map<String, dynamic>> pay(String opId, String purchaseId, Map<String, dynamic> payment, {required String userId}) async {
+    calls.add('pay:$opId:$purchaseId');
+    _write();
+    if (accepted.contains(opId)) return {'payment_id': 'replayed', 'replayed': true};
+    paid.add({'op': opId, 'purchase_id': purchaseId, ...payment});
+    accepted.add(opId);
+    if (loseNextAnswer) {
+      loseNextAnswer = false;
+      throw const SocketException('the answer was lost');
+    }
+    return {'payment_id': 'pay${paid.length}'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> voidPayment(String opId, String paymentId, String reason, {required String userId}) async {
+    calls.add('voidPayment:$opId:$paymentId:$reason');
+    _write();
+    return {'payment_id': paymentId};
+  }
+
+  @override
+  Future<Map<String, dynamic>> reportReturn(String opId, Map<String, dynamic> body, String photoUrl, {required String userId}) async {
+    calls.add('return:$opId');
+    _write();
+    returned.add({'op': opId, ...body, 'photo_url': photoUrl});
+    accepted.add(opId);
+    return {'return_id': 'r${returned.length}'};
+  }
+
+  @override
+  Future<Map<String, dynamic>> withdrawReturn(String opId, String returnId, {required String userId}) async {
+    calls.add('withdraw:$opId:$returnId');
+    _write();
+    return {'return_id': returnId};
+  }
+
+  @override
+  Future<Map<String, dynamic>> dispute(String opId, String issueId, String note, {required String userId}) async {
+    calls.add('dispute:$opId:$issueId:$note');
+    _write();
+    return {'issue_id': issueId};
   }
 
   @override

@@ -34,6 +34,28 @@ enum PurFailure {
   linesChanged,
   alreadyPending,
   reasonRequired,
+
+  // Payments, petty cash, own money (0102).
+  /// More than the supplier credit has left.
+  overCredit,
+
+  /// The supplier credit was voided, or is not there.
+  creditGone,
+
+  /// A credit with another supplier than the purchase's.
+  creditSupplier,
+
+  /// A refund or credit relies on this payment: the owner voids that first (R8).
+  resolvedFirst,
+
+  /// Only whoever recorded it (or the main owner) voids it (Q7).
+  notYours,
+
+  /// "I did not receive this" was already sent for that entry (Q14).
+  alreadyDisputed,
+
+  /// Petty cash and own money are a staff buyer's (R2).
+  notAHolder,
   invalid,
 
   /// A receipt photo of an unsent purchase is no longer on the phone.
@@ -76,6 +98,22 @@ enum PurFailure {
     'LINES_CHANGED': linesChanged,
     'ALREADY_PENDING': alreadyPending,
     'REASON_REQUIRED': reasonRequired,
+    'OVER_CREDIT': overCredit,
+    'CREDIT_GONE': creditGone,
+    'CREDIT_REQUIRED': creditGone,
+    'CREDIT_SUPPLIER': creditSupplier,
+    'RESOLVED_FIRST': resolvedFirst,
+    'NOT_YOURS': notYours,
+    'ALREADY_DISPUTED': alreadyDisputed,
+    'NOT_A_BUYER': notAHolder,
+    'PERSON_REQUIRED': notAHolder,
+    'PERSON_NOT_ALLOWED': notAHolder,
+    'ALREADY_VOIDED': notFound,
+    'BAD_PAY': invalid,
+    'BAD_PAY_SOURCE': invalid,
+    'BAD_METHOD': invalid,
+    'BAD_PERSON': invalid,
+    'BAD_NOTE': invalid,
     'BAD_DATE': invalid,
     'BAD_AMOUNT': invalid,
     'BAD_LINES': invalid,
@@ -197,6 +235,26 @@ Bilingual purFailureCopy(PurFailure f) => switch (f) {
           'A change for this purchase is already waiting for the owner.', 'May pagbabago nang naghihintay sa may-ari para dito.'),
       PurFailure.reasonRequired => const Bilingual(
           'Say why you are changing it.', 'Sabihin kung bakit mo ito binabago.'),
+      PurFailure.overCredit => const Bilingual(
+          'That is more than the supplier credit has left. Pay the rest another way.',
+          'Mas malaki iyan sa natitirang credit sa supplier. Bayaran ang kulang sa ibang paraan.'),
+      PurFailure.creditGone => const Bilingual(
+          'That supplier credit is no longer there. Choose another way to pay.',
+          'Wala na ang credit na iyon sa supplier. Pumili ng ibang paraan ng pagbayad.'),
+      PurFailure.creditSupplier => const Bilingual(
+          'That credit is with another supplier. Use it only on that supplier\'s purchases.',
+          'Sa ibang supplier ang credit na iyon. Gamitin lang sa binili sa supplier na iyon.'),
+      PurFailure.resolvedFirst => const Bilingual(
+          'A refund or credit relies on this payment. Ask the owner to void that first.',
+          'May refund o credit na nakasalalay sa bayad na ito. Ipa-void muna iyon sa may-ari.'),
+      PurFailure.notYours => const Bilingual(
+          'Only whoever recorded it, or the owner, can void it.', 'Ang nagtala lang nito, o ang may-ari, ang puwedeng mag-void.'),
+      PurFailure.alreadyDisputed => const Bilingual(
+          'You already said you did not receive this. The owner is checking it.',
+          'Nasabi mo na na hindi mo ito natanggap. Sinusuri na ng may-ari.'),
+      PurFailure.notAHolder => const Bilingual(
+          'Petty cash and own money are for staff buyers. Choose Company instead.',
+          'Ang petty cash at sariling pera ay para sa staff na bumibili. Piliin ang Kompanya.'),
       PurFailure.invalid => const Bilingual(
           'Something on the purchase is not filled in correctly. Check each line.',
           'May mali sa pagkakapuno ng purchase. Suriin ang bawat linya.'),

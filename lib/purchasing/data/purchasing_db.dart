@@ -16,7 +16,7 @@ class PurchasingDb {
   static Future<PurchasingDb> open(DatabaseFactory factory, String path, {bool singleInstance = true}) async {
     final db = await factory.openDatabase(
       path,
-      options: OpenDatabaseOptions(version: 1, onCreate: _create, singleInstance: singleInstance),
+      options: OpenDatabaseOptions(version: 2, onCreate: _create, onUpgrade: _upgrade, singleInstance: singleInstance),
     );
     return PurchasingDb._(db);
   }
@@ -42,7 +42,8 @@ class PurchasingDb {
         attempts integer not null default 0,
         last_error text,
         failed_permanently integer not null default 0,
-        created_at integer not null
+        created_at integer not null,
+        done_at integer
       )''');
     await db.execute('''
       create table pur_cache (
@@ -50,8 +51,18 @@ class PurchasingDb {
         name text not null,
         body text not null,
         fetched_at integer not null,
+        covers text,
         primary key (user_id, name)
       )''');
+  }
+
+  /// Version 2 (0.8.0, R38): a sent op is kept until every saved copy counts
+  /// it (done_at); each saved copy names the sent ops it counts (covers).
+  static Future<void> _upgrade(Database db, int from, int to) async {
+    if (from < 2) {
+      await db.execute('alter table pur_op add column done_at integer');
+      await db.execute('alter table pur_cache add column covers text');
+    }
   }
 
   Future<void> close() => _db.close();
@@ -60,10 +71,10 @@ class PurchasingDb {
 
   // ── drafts ─────────────────────────────────────────────────────────────
 
-  /// Never rewrites a queued draft: once handed to the queue it changes only
-  /// through [unqueueDraft].
+  /// Never rewrites a queued (or sent: queued = 2) draft: once handed to the
+  /// queue it changes only through [unqueueDraft].
   Future<void> saveDraft(String userId, PurchaseDraft d, DateTime now) => _db.transaction((txn) async {
-        final queued = await txn.query('pur_draft', columns: ['id'], where: 'id = ? and queued = 1', whereArgs: [d.id], limit: 1);
+        final queued = await txn.query('pur_draft', columns: ['id'], where: 'id = ? and queued >= 1', whereArgs: [d.id], limit: 1);
         if (queued.isNotEmpty) return;
         await txn.insert(
           'pur_draft',
@@ -79,7 +90,8 @@ class PurchasingDb {
         );
       });
 
-  /// [queued] false = still being edited; true = handed to the queue.
+  /// [queued] false = still being edited; true = handed to the queue and not
+  /// sent yet (sent ones: [sentDrafts]).
   Future<List<PurchaseDraft>> drafts(String userId, {required bool queued}) async => (await _db.query('pur_draft',
           where: 'user_id = ? and queued = ?', whereArgs: [userId, queued ? 1 : 0], orderBy: 'created_at desc'))
       .map(_draft)
@@ -103,7 +115,7 @@ class PurchasingDb {
   /// neither. False (nothing written) when it is already queued: a second
   /// Send must never record a second purchase.
   Future<bool> queueDraft(String userId, PurchaseDraft d, PurOp op, DateTime now) => _db.transaction((txn) async {
-        final already = await txn.query('pur_draft', columns: ['id'], where: 'id = ? and queued = 1', whereArgs: [d.id], limit: 1);
+        final already = await txn.query('pur_draft', columns: ['id'], where: 'id = ? and queued >= 1', whereArgs: [d.id], limit: 1);
         if (already.isNotEmpty) return false;
         await txn.insert(
           'pur_draft',
@@ -148,26 +160,72 @@ class PurchasingDb {
         return _draft(rows.first);
       });
 
-  /// Purchases on the phone not yet recorded: being edited, waiting to send
-  /// or needing attention — for the Buying is turned off screen.
+  /// Purchases on the phone not yet recorded (being edited, waiting to send
+  /// or needing attention), and payments and returns not yet sent (0102) —
+  /// for the Buying is turned off screen.
   Future<int> unsentCount(String userId) async =>
-      Sqflite.firstIntValue(await _db.rawQuery('select count(*) from pur_draft where user_id = ?', [userId])) ?? 0;
+      Sqflite.firstIntValue(await _db.rawQuery(
+          'select (select count(*) from pur_draft where user_id = ? and queued < 2)'
+          ' + (select count(*) from pur_op where user_id = ? and draft_id is null and done_at is null)',
+          [userId, userId])) ??
+      0;
+
+  /// A payment or a return (0102) queued on its own: no draft, sent once
+  /// in queue order. Its op id is minted once, so a retry records it once.
+  Future<void> queueOp(PurOp op) => _db.transaction((txn) async {
+        final top = (await txn.rawQuery('select coalesce(max(seq), 0) as s from pur_op')).first['s']! as int;
+        await txn.insert('pur_op', {...op.toMap(), 'seq': top + 1});
+      });
+
+  /// A refused payment or return the buyer throws away: returned (for its
+  /// photo) and deleted. Null while it could still be sent, or when it is
+  /// a purchase (those go through [discardRefused]).
+  Future<PurOp?> discardFailedOp(String userId, String opId) => _db.transaction((txn) async {
+        final rows = await txn.query('pur_op',
+            where: 'user_id = ? and op_id = ? and draft_id is null and failed_permanently = 1', whereArgs: [userId, opId], limit: 1);
+        if (rows.isEmpty) return null;
+        await txn.delete('pur_op', where: 'op_id = ?', whereArgs: [opId]);
+        return PurOp.fromMap(rows.first);
+      });
 
   // ── the queue ──────────────────────────────────────────────────────────
 
   /// This account's ops that may still be sent, in queue order.
   Future<List<PurOp>> sendable(String userId) async => (await _db.query('pur_op',
-          where: 'user_id = ? and failed_permanently = 0', whereArgs: [userId], orderBy: 'seq asc'))
+          where: 'user_id = ? and failed_permanently = 0 and done_at is null', whereArgs: [userId], orderBy: 'seq asc'))
       .map(PurOp.fromMap)
       .toList();
 
-  /// Every op of this account, refused ones included, in queue order.
+  /// Every op of this account not sent yet, refused ones included, in queue order.
   Future<List<PurOp>> ops(String userId) async =>
-      (await _db.query('pur_op', where: 'user_id = ?', whereArgs: [userId], orderBy: 'seq asc')).map(PurOp.fromMap).toList();
+      (await _db.query('pur_op', where: 'user_id = ? and done_at is null', whereArgs: [userId], orderBy: 'seq asc')).map(PurOp.fromMap).toList();
+
+  /// R38: ops the server has, kept while a saved copy does not count them
+  /// yet, in queue order.
+  Future<List<PurOp>> sentOps(String userId) async =>
+      (await _db.query('pur_op', where: 'user_id = ? and done_at is not null', whereArgs: [userId], orderBy: 'seq asc'))
+          .map(PurOp.fromMap)
+          .toList();
+
+  /// The drafts of sent purchases, kept with their op.
+  Future<List<PurchaseDraft>> sentDrafts(String userId) async =>
+      (await _db.query('pur_draft', where: 'user_id = ? and queued = 2', whereArgs: [userId], orderBy: 'created_at desc')).map(_draft).toList();
+
+  /// Sent ops every saved copy now counts: they go, with their drafts.
+  Future<void> forgetSent(String userId, Iterable<String> opIds) => _db.transaction((txn) async {
+        for (final id in opIds) {
+          final rows = await txn.query('pur_op',
+              columns: ['draft_id'], where: 'user_id = ? and op_id = ? and done_at is not null', whereArgs: [userId, id], limit: 1);
+          if (rows.isEmpty) continue;
+          await txn.delete('pur_op', where: 'op_id = ?', whereArgs: [id]);
+          final draftId = rows.first['draft_id'] as String?;
+          if (draftId != null) await txn.delete('pur_draft', where: 'id = ? and queued = 2', whereArgs: [draftId]);
+        }
+      });
 
   /// Any account: the app-closed sweeper asks this before it touches auth.
   Future<bool> hasAnySendable() async =>
-      (await _db.query('pur_op', columns: ['op_id'], where: 'failed_permanently = 0', limit: 1)).isNotEmpty;
+      (await _db.query('pur_op', columns: ['op_id'], where: 'failed_permanently = 0 and done_at is null', limit: 1)).isNotEmpty;
 
   /// Progress kept between attempts (uploaded receipt links, the company).
   Future<void> updateOpBody(String opId, Map<String, dynamic> body) =>
@@ -182,25 +240,32 @@ class PurchasingDb {
   Future<void> markFailed(String opId, String error) =>
       _db.rawUpdate('update pur_op set failed_permanently = 1, last_error = ? where op_id = ?', [error, opId]);
 
-  /// The purchase is recorded on the server: the op and its draft go
-  /// together, so it is never shown twice.
-  Future<void> finishRecord(String opId, String? draftId) => _db.transaction((txn) async {
-        await txn.delete('pur_op', where: 'op_id = ?', whereArgs: [opId]);
-        if (draftId != null) await txn.delete('pur_draft', where: 'id = ?', whereArgs: [draftId]);
+  /// The server has it (R38): never sent again, and no longer waiting. The
+  /// op and its draft are KEPT, marked sent, until every saved copy counts
+  /// it ([forgetSent]): a copy read before it went must still show it.
+  Future<void> markSent(String opId, String? draftId, DateTime at) => _db.transaction((txn) async {
+        await txn.update('pur_op', {'done_at': at.millisecondsSinceEpoch}, where: 'op_id = ? and done_at is null', whereArgs: [opId]);
+        if (draftId != null) await txn.update('pur_draft', {'queued': 2}, where: 'id = ?', whereArgs: [draftId]);
       });
 
   // ── last answers read, for offline ─────────────────────────────────────
 
-  Future<void> putCache(String userId, String name, Object json, DateTime at) => _db.insert(
+  /// [covers]: the sent ops this answer already counts (R38).
+  Future<void> putCache(String userId, String name, Object json, DateTime at, {Iterable<String> covers = const []}) => _db.insert(
         'pur_cache',
-        {'user_id': userId, 'name': name, 'body': jsonEncode(json), 'fetched_at': at.millisecondsSinceEpoch},
+        {'user_id': userId, 'name': name, 'body': jsonEncode(json), 'fetched_at': at.millisecondsSinceEpoch, 'covers': jsonEncode(covers.toList())},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-  Future<({Object? body, DateTime at})?> cache(String userId, String name) async {
+  Future<({Object? body, DateTime at, Set<String> covers})?> cache(String userId, String name) async {
     final rows = await _db.query('pur_cache', where: 'user_id = ? and name = ?', whereArgs: [userId, name], limit: 1);
     if (rows.isEmpty) return null;
-    return (body: jsonDecode(rows.first['body']! as String), at: DateTime.fromMillisecondsSinceEpoch(rows.first['fetched_at']! as int, isUtc: true));
+    final covers = rows.first['covers'] as String?;
+    return (
+      body: jsonDecode(rows.first['body']! as String),
+      at: DateTime.fromMillisecondsSinceEpoch(rows.first['fetched_at']! as int, isUtc: true),
+      covers: covers == null ? <String>{} : {for (final c in jsonDecode(covers) as List<dynamic>) c as String},
+    );
   }
 
   /// Keeps only [userId]'s saved copy ('' keeps none). Drafts and the queue

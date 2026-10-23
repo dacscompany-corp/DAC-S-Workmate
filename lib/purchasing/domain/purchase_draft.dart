@@ -1,4 +1,5 @@
 import '../../requests/domain/quantity.dart';
+import 'pay_models.dart';
 import 'pur_models.dart';
 
 const _keep = Object();
@@ -297,6 +298,11 @@ class PurchaseDraft {
     this.photos = const {},
     this.noReceipt = false,
     this.noReceiptReason = '',
+    this.paidNow = 'none',
+    this.paidAmount = '',
+    this.paidFrom = 'company',
+    this.paidMethod = 'cash',
+    this.paidCredit,
   });
 
   factory PurchaseDraft.fromJson(Map<String, dynamic> j) => PurchaseDraft(
@@ -313,6 +319,11 @@ class PurchaseDraft {
         photos: Map<String, String>.from((j['photos'] as Map?) ?? const {}),
         noReceipt: j['no_receipt'] == true,
         noReceiptReason: (j['no_receipt_reason'] as String?) ?? '',
+        paidNow: (j['paid_now'] as String?) ?? 'none',
+        paidAmount: (j['paid_amount'] as String?) ?? '',
+        paidFrom: (j['paid_from'] as String?) ?? 'company',
+        paidMethod: (j['paid_method'] as String?) ?? 'cash',
+        paidCredit: j['paid_credit'] as String?,
       );
 
   final String id;
@@ -336,6 +347,21 @@ class PurchaseDraft {
   final bool noReceipt;
   final String noReceiptReason;
 
+  /// "Paid now?" (0102, Q3): 'none' (Not paid yet), 'full' or 'part'. A
+  /// payment entered here is recorded in the SAME transaction as the
+  /// purchase: both or neither. Later payments go through Record payment.
+  final String paidNow;
+
+  /// The part paid, when [paidNow] is 'part'.
+  final String paidAmount;
+
+  /// petty_cash · own_money · company · credit (Q5).
+  final String paidFrom;
+  final String paidMethod;
+
+  /// The supplier credit used, when [paidFrom] is 'credit' (R10).
+  final String? paidCredit;
+
   /// Lines + fees − discounts, from what is typed (blank counts as 0).
   double get computedTotal {
     double v(String s) => parseMoney(s) ?? 0;
@@ -357,6 +383,11 @@ class PurchaseDraft {
     Map<String, String>? photos,
     bool? noReceipt,
     String? noReceiptReason,
+    String? paidNow,
+    String? paidAmount,
+    String? paidFrom,
+    String? paidMethod,
+    Object? paidCredit = _keep,
   }) =>
       PurchaseDraft(
         id: id,
@@ -372,6 +403,11 @@ class PurchaseDraft {
         photos: photos ?? this.photos,
         noReceipt: noReceipt ?? this.noReceipt,
         noReceiptReason: noReceiptReason ?? this.noReceiptReason,
+        paidNow: paidNow ?? this.paidNow,
+        paidAmount: paidAmount ?? this.paidAmount,
+        paidFrom: paidFrom ?? this.paidFrom,
+        paidMethod: paidMethod ?? this.paidMethod,
+        paidCredit: identical(paidCredit, _keep) ? this.paidCredit : paidCredit as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -388,6 +424,11 @@ class PurchaseDraft {
         'photos': photos,
         'no_receipt': noReceipt,
         'no_receipt_reason': noReceiptReason,
+        'paid_now': paidNow,
+        'paid_amount': paidAmount,
+        'paid_from': paidFrom,
+        'paid_method': paidMethod,
+        'paid_credit': paidCredit,
       };
 }
 
@@ -436,6 +477,14 @@ enum ProblemKind {
   noReceiptReason,
   badTotal,
   totalMismatch,
+
+  // "Paid now?" (0102): the web's paidNowProblems codes.
+  paidAmount,
+  partNotLess,
+  personRequired,
+  badPaySource,
+  creditRequired,
+  overCredit,
 }
 
 class PurchaseProblem {
@@ -514,6 +563,47 @@ List<PurchaseProblem> purchaseProblems(PurchaseDraft d) {
   return out;
 }
 
+/// The payment "Paid now?" adds to the purchase, or null for Not paid yet.
+/// Paid in full sends the receipt total; the payment's date is the
+/// purchase's own date.
+PaymentInput? paidNowPayment(PurchaseDraft d) {
+  if (d.paidNow != 'full' && d.paidNow != 'part') return null;
+  final total = round2(parseMoney(d.receiptTotal) ?? 0);
+  return PaymentInput(
+    amount: d.paidNow == 'full' ? total.toStringAsFixed(2) : d.paidAmount,
+    paidOn: d.purchaseDate,
+    method: d.paidMethod,
+    source: d.paidFrom,
+    creditId: d.paidFrom == 'credit' ? d.paidCredit : null,
+  );
+}
+
+/// What "Paid now?" would have refused (the web's paidNowProblems).
+/// [holder]: this account holds petty cash (a staff buyer, R2);
+/// [creditLeft]: what the chosen credit has left, if known.
+List<PurchaseProblem> paidNowProblems(PurchaseDraft d, {required bool holder, double? creditLeft}) {
+  final pay = paidNowPayment(d);
+  if (pay == null) return const [];
+  final out = <PurchaseProblem>[];
+  final amount = parseMoney(pay.amount);
+  final total = parseMoney(d.receiptTotal) ?? 0;
+  if (amount == null || amount <= 0) {
+    out.add(const PurchaseProblem(ProblemKind.paidAmount));
+  } else if (d.paidNow == 'part' && amount >= total) {
+    out.add(const PurchaseProblem(ProblemKind.partNotLess));
+  }
+  if ((d.paidFrom == 'petty_cash' || d.paidFrom == 'own_money') && !holder) out.add(const PurchaseProblem(ProblemKind.personRequired));
+  if (!paySources.contains(d.paidFrom)) out.add(const PurchaseProblem(ProblemKind.badPaySource));
+  if (d.paidFrom == 'credit') {
+    if ((d.paidCredit ?? '').isEmpty) {
+      out.add(const PurchaseProblem(ProblemKind.creditRequired));
+    } else if (amount != null && amount > 0 && creditLeft != null && amount > creditLeft) {
+      out.add(const PurchaseProblem(ProblemKind.overCredit));
+    }
+  }
+  return out;
+}
+
 /// The pur_record body (0096/0097/0101) for a draft that has no problems.
 /// [docs]: receipt slot → uploaded link.
 Map<String, dynamic> purchaseBody(PurchaseDraft d, {Map<String, String> docs = const {}}) {
@@ -574,5 +664,6 @@ Map<String, dynamic> purchaseBody(PurchaseDraft d, {Map<String, String> docs = c
     'receipt_total': round2(parseMoney(d.receiptTotal) ?? 0),
     'lines': lines,
     'charges': charges,
+    if (paidNowPayment(d) case final pay?) 'payments': [paymentBody(pay)],
   };
 }

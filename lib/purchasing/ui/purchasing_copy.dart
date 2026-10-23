@@ -21,6 +21,9 @@ const notArrangedLabel = Bilingual('Not arranged', 'Hindi pa naayos');
 const recordLabel = Bilingual('Record purchase', 'Itala ang binili');
 const noReceiptLabel = Bilingual('No receipt', 'Walang resibo');
 const waitingLabel = Bilingual('Waiting to send', 'Hinihintay maipadala');
+
+/// R38: the server has it; the list shown was read before it went (offline).
+const sentLabel = Bilingual('Sent — shows in the list when it next updates', 'Naipadala na — lalabas sa listahan sa susunod na update');
 const attentionLabel = Bilingual('Needs attention', 'Kailangang ayusin');
 const needsSignal = Bilingual('This needs signal. Try again when you are online.', 'Kailangan ng signal. Subukan ulit kapag online ka na.');
 
@@ -53,6 +56,14 @@ Bilingual problemCopy(ProblemKind k) => switch (k) {
       ProblemKind.badTotal => const Bilingual('Enter the total printed on the receipt.', 'Ilagay ang total na nakasulat sa resibo.'),
       ProblemKind.totalMismatch => const Bilingual('Items + fees − discounts do not match the receipt total.',
           'Hindi tugma ang items + bayad − diskwento sa total ng resibo.'),
+      ProblemKind.paidAmount => const Bilingual('Enter how much was paid now.', 'Ilagay kung magkano ang ibinayad ngayon.'),
+      ProblemKind.partNotLess => const Bilingual('A part payment is less than the receipt total. Choose Paid in full instead.',
+          'Ang bahagyang bayad ay mas mababa sa total ng resibo. Piliin ang Bayad nang buo.'),
+      ProblemKind.personRequired => const Bilingual('Petty cash and own money are for staff buyers. Choose Company.',
+          'Ang petty cash at sariling pera ay para sa staff na bumibili. Piliin ang Kompanya.'),
+      ProblemKind.badPaySource => const Bilingual('Choose where the money came from.', 'Piliin kung saan galing ang pera.'),
+      ProblemKind.creditRequired => const Bilingual('Choose the supplier credit to use.', 'Piliin ang credit ng supplier na gagamitin.'),
+      ProblemKind.overCredit => const Bilingual('That is more than the credit has left.', 'Mas malaki iyan sa natitirang credit.'),
     };
 
 /// The four receipt slots, as the Purchasing tab names them.

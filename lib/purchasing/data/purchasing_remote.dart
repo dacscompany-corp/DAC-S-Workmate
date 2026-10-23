@@ -55,8 +55,29 @@ abstract class PurchasingRemote {
       {required String userId});
 
   /// The ledger row, THEN the file (0089: a file never exists without one).
-  /// Returns the link stored on the purchase.
-  Future<String> uploadReceipt({required String path, required String localPath, required String companyId, required String userId});
+  /// Returns the link stored on the purchase. [kind] is the ledger's:
+  /// 'purchase' (receipts and payment proofs) or 'petty_cash' (a return's photo).
+  Future<String> uploadReceipt(
+      {required String path, required String localPath, required String companyId, required String userId, String kind = 'purchase'});
+
+  // ── payments, petty cash, own money (0102, 0103) ──
+  /// The signed-in buyer's own cash (pur_my_cash).
+  Future<Map<String, dynamic>> myCash();
+
+  /// Which of these op ids (this account's own) the server already accepted
+  /// (pur_my_ops_done, 0103) — at most 200 at once.
+  Future<List<String>> opsDone(List<String> opIds);
+
+  /// Every supplier credit of the company, used or not (pur_credits).
+  Future<List<Map<String, dynamic>>> credits();
+
+  /// One purchase's payments, its open credits and what this account may use.
+  Future<Map<String, dynamic>> purchasePayments(String purchaseId);
+  Future<Map<String, dynamic>> pay(String opId, String purchaseId, Map<String, dynamic> payment, {required String userId});
+  Future<Map<String, dynamic>> voidPayment(String opId, String paymentId, String reason, {required String userId});
+  Future<Map<String, dynamic>> reportReturn(String opId, Map<String, dynamic> body, String photoUrl, {required String userId});
+  Future<Map<String, dynamic>> withdrawReturn(String opId, String returnId, {required String userId});
+  Future<Map<String, dynamic>> dispute(String opId, String issueId, String note, {required String userId});
 
   /// The receipt's bytes, read as the buyer (never a signed link: 0097), or null.
   Future<Uint8List?> receipt(String url);
@@ -132,10 +153,11 @@ class SupabasePurchasingRemote implements PurchasingRemote {
       _write('pur_request_change', {'p_op': opId, 'p_purchase': purchaseId, 'p_kind': 'correct', 'p_body': body, 'p_reason': reason}, userId);
 
   @override
-  Future<String> uploadReceipt({required String path, required String localPath, required String companyId, required String userId}) async {
+  Future<String> uploadReceipt(
+      {required String path, required String localPath, required String companyId, required String userId, String kind = 'purchase'}) async {
     _same(userId);
     try {
-      await _client.from('receipt_uploads').insert({'path': path, 'owner_id': companyId, 'kind': 'purchase'}).timeout(_readTimeout);
+      await _client.from('receipt_uploads').insert({'path': path, 'owner_id': companyId, 'kind': kind}).timeout(_readTimeout);
     } catch (e) {
       if (!isDuplicate(e)) rethrow;
     }
@@ -149,6 +171,47 @@ class SupabasePurchasingRemote implements PurchasingRemote {
     }
     return _client.storage.from(receiptBucket).getPublicUrl(path);
   }
+
+  @override
+  Future<Map<String, dynamic>> myCash() async => Map<String, dynamic>.from(await _read('pur_my_cash') as Map);
+
+  @override
+  Future<List<Map<String, dynamic>>> credits() async => _rows(await _read('pur_credits', {'p_supplier': null}));
+
+  @override
+  Future<List<String>> opsDone(List<String> opIds) async =>
+      [for (final id in (await _read('pur_my_ops_done', {'p_ops': opIds}) as List<dynamic>? ?? const [])) id.toString()];
+
+  @override
+  Future<Map<String, dynamic>> purchasePayments(String purchaseId) async =>
+      Map<String, dynamic>.from(await _read('pur_purchase_payments', {'p_purchase': purchaseId}) as Map);
+
+  @override
+  Future<Map<String, dynamic>> pay(String opId, String purchaseId, Map<String, dynamic> payment, {required String userId}) =>
+      _write('pur_pay', {'p_op': opId, 'p_purchase': purchaseId, 'p_payment': payment}, userId);
+
+  @override
+  Future<Map<String, dynamic>> voidPayment(String opId, String paymentId, String reason, {required String userId}) =>
+      _write('pur_void_payment', {'p_op': opId, 'p_payment': paymentId, 'p_reason': reason}, userId);
+
+  @override
+  Future<Map<String, dynamic>> reportReturn(String opId, Map<String, dynamic> body, String photoUrl, {required String userId}) =>
+      _write('pur_cash_report_return', {
+        'p_op': opId,
+        'p_amount': body['amount'],
+        'p_handed_on': body['handed_on'],
+        'p_handed_to': body['handed_to'] ?? '',
+        'p_photo_url': photoUrl,
+        'p_note': body['note'] ?? '',
+      }, userId);
+
+  @override
+  Future<Map<String, dynamic>> withdrawReturn(String opId, String returnId, {required String userId}) =>
+      _write('pur_cash_withdraw_return', {'p_op': opId, 'p_return': returnId}, userId);
+
+  @override
+  Future<Map<String, dynamic>> dispute(String opId, String issueId, String note, {required String userId}) =>
+      _write('pur_cash_dispute', {'p_op': opId, 'p_issue': issueId, 'p_note': note}, userId);
 
   @override
   Future<Uint8List?> receipt(String url) async {

@@ -10,9 +10,11 @@ import '../domain/pur_op.dart';
 /// A sane ceiling for one pass.
 const _maxPerRun = 50;
 
-/// Sends purchases recorded on the phone (Q7): for each, its receipt photos
-/// (each once: the link is kept between attempts), then pur_record with the
-/// op id minted at Send, so it is recorded once however often it is tried.
+/// Sends what was recorded on the phone (Q7; 0102 Q6): for each, its photos
+/// (each once: the link is kept between attempts), then the server call with
+/// the op id minted at Send, so it is recorded once however often it is
+/// tried — pur_record (a purchase, with any "paid now" payment inside it),
+/// pur_pay (a later payment) or pur_cash_report_return (a return).
 /// One account's queue, in order; stops at the first failure worth retrying.
 class PurchasingSync {
   PurchasingSync({required this.db, required this.remote, DateTime Function()? now}) : _now = now ?? DateTime.now;
@@ -44,6 +46,9 @@ class PurchasingSync {
         o = o.copyWith(companyId: await remote.company(userId));
         await db.updateOpBody(o.opId, o.bodyJson);
       }
+      // Receipts and payment proofs under purchases/; a return's photo under
+      // the private pettyCash/ (R13), each with its own upload kind.
+      final target = photoTarget(o.kind);
       final docs = <String, String>{};
       for (final e in o.receipts.entries) {
         var r = e.value;
@@ -55,17 +60,27 @@ class PurchasingSync {
         final file = File(r.local);
         if (!file.existsSync()) throw const PurFailureException(PurFailure.photoMissing);
         if (r.path == null) {
-          r = r.withPath(receiptPath(companyId: o.companyId!, manilaNow: manilaFields(_now()), photoId: r.photoId));
+          r = r.withPath(receiptPath(companyId: o.companyId!, manilaNow: manilaFields(_now()), photoId: r.photoId, folder: target.folder));
           o = o.copyWith(receipts: {...o.receipts, e.key: r});
           await db.updateOpBody(o.opId, o.bodyJson);
         }
-        final url = await remote.uploadReceipt(path: r.path!, localPath: file.path, companyId: o.companyId!, userId: userId);
+        final url = await remote.uploadReceipt(path: r.path!, localPath: file.path, companyId: o.companyId!, userId: userId, kind: target.kind);
         o = o.copyWith(receipts: {...o.receipts, e.key: r.withUrl(url)});
         await db.updateOpBody(o.opId, o.bodyJson);
         docs[e.key] = url;
       }
-      await remote.record(o.opId, {...o.purchase, 'docs': docs}, userId: userId);
-      await db.finishRecord(o.opId, o.draftId);
+      switch (o.kind) {
+        case opPay:
+          final payment = Map<String, dynamic>.from(o.purchase['payment'] as Map);
+          await remote.pay(o.opId, o.purchase['purchase_id'] as String, {...payment, 'proof_url': ?docs['proof']},
+              userId: userId);
+        case opCashReturn:
+          await remote.reportReturn(o.opId, o.purchase, docs['photo'] ?? '', userId: userId);
+        default:
+          await remote.record(o.opId, {...o.purchase, 'docs': docs}, userId: userId);
+      }
+      // R38: kept, marked sent, until every saved copy counts it.
+      await db.markSent(o.opId, o.draftId, _now());
       for (final r in o.receipts.values) {
         _discard(File(r.local)); // only now is the photo safe to delete
       }

@@ -2,6 +2,8 @@
 /// reads it. Numbers arrive as JSON numbers or numeric text; both are read.
 library;
 
+import 'pay_models.dart' show PayState;
+
 double _num(Object? v) => switch (v) {
       num n => n.toDouble(),
       String s => double.tryParse(s) ?? 0,
@@ -262,6 +264,8 @@ class MyPurchase {
     this.pendingChange = false,
     this.noReceiptReason = '',
     this.replacedBy,
+    this.supplierId,
+    this.pay = const PayState(),
   });
 
   factory MyPurchase.fromJson(Map<String, dynamic> j) => MyPurchase(
@@ -281,6 +285,8 @@ class MyPurchase {
         pendingChange: j['pending_change'] == true,
         noReceiptReason: _str(j['no_receipt_reason']),
         replacedBy: j['replaced_by'] as String?,
+        supplierId: j['supplier_id'] as String?,
+        pay: PayState.fromJson(j['pay'] == null ? null : Map<String, dynamic>.from(j['pay'] as Map)),
       );
 
   final String id;
@@ -299,6 +305,12 @@ class MyPurchase {
   final bool pendingChange;
   final String noReceiptReason;
   final String? replacedBy;
+
+  /// The listed supplier (0103), for paying from that supplier's credit.
+  final String? supplierId;
+
+  /// How it is paid (0102): Unpaid / Partially paid / Paid / Overpaid.
+  final PayState pay;
 
   bool get voided => status == 'void';
 }

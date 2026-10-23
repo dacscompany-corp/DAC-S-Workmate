@@ -45,6 +45,7 @@ class PurOp {
     this.attempts = 0,
     this.lastError,
     this.failedPermanently = false,
+    this.sent = false,
   });
 
   factory PurOp.fromMap(Map<String, Object?> m) {
@@ -65,6 +66,7 @@ class PurOp {
       attempts: (m['attempts'] as int?) ?? 0,
       lastError: m['last_error'] as String?,
       failedPermanently: m['failed_permanently'] == 1,
+      sent: m['done_at'] != null,
     );
   }
 
@@ -90,6 +92,11 @@ class PurOp {
   final String? lastError;
   final bool failedPermanently;
 
+  /// R38: the server has it. Kept on the phone (never sent again) until every
+  /// saved copy that shows it counts it, so a copy read before it went still
+  /// shows it and no balance is ever wrong because of it.
+  final bool sent;
+
   Map<String, dynamic> get bodyJson => {
         'purchase': purchase,
         'company_id': companyId,
@@ -109,6 +116,7 @@ class PurOp {
         attempts: attempts,
         lastError: lastError,
         failedPermanently: failedPermanently,
+        sent: sent,
       );
 
   Map<String, Object?> toMap() => {
@@ -125,10 +133,25 @@ class PurOp {
       };
 }
 
-/// `purchases/<company>/<yyyy-mm>/<photo>.jpg` — the only shape 0097's
-/// receipt_uploads check and the buyer-only storage rule accept. The month is
-/// Manila's ([manilaNow] already shifted), as the web's local-parts month.
-String receiptPath({required String companyId, required DateTime manilaNow, required String photoId}) {
+/// `<folder>/<company>/<yyyy-mm>/<photo>.jpg` — the only shape the
+/// receipt_uploads check and the storage rules accept. [folder] is
+/// `purchases` (receipts and payment proofs, buyers of the company: 0097) or
+/// `pettyCash` (a return's photo: the main owner and its uploader only, 0102
+/// R13). The month is Manila's ([manilaNow] already shifted), as the web's
+/// local-parts month.
+String receiptPath({required String companyId, required DateTime manilaNow, required String photoId, String folder = 'purchases'}) {
   final ym = '${manilaNow.year.toString().padLeft(4, '0')}-${manilaNow.month.toString().padLeft(2, '0')}';
-  return 'purchases/${companyId.toLowerCase()}/$ym/${photoId.toLowerCase()}.jpg';
+  return '$folder/${companyId.toLowerCase()}/$ym/${photoId.toLowerCase()}.jpg';
 }
+
+/// What a queued op sends (0102). 'record' is a purchase (with any "paid
+/// now" payment inside it, one transaction); 'pay' a later payment on a
+/// recorded purchase (its proof photo under purchases/); 'cash_return' a
+/// return of petty cash (its photo under pettyCash/).
+const opRecord = 'record';
+const opPay = 'pay';
+const opCashReturn = 'cash_return';
+
+/// The upload kind and folder each op's photos go to.
+({String kind, String folder}) photoTarget(String opKind) =>
+    opKind == opCashReturn ? (kind: 'petty_cash', folder: 'pettyCash') : (kind: 'purchase', folder: 'purchases');
