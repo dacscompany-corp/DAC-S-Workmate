@@ -78,6 +78,15 @@ void main() {
     expect((await db.drafts('u1', queued: true)).single.id, 'd1');
   });
 
+  test('F3: a saved copy is only replaced by a read begun no earlier', () async {
+    final later = now.add(const Duration(minutes: 1));
+    expect(await db.putCacheIfNewer('u1', 'my_cash', const {'held': 2}, later), isTrue);
+    expect(await db.putCacheIfNewer('u1', 'my_cash', const {'held': 1}, now), isFalse);
+    expect((await db.cache('u1', 'my_cash'))!.body, {'held': 2});
+    expect(await db.putCacheIfNewer('u1', 'my_cash', const {'held': 3}, later, covers: ['o1']), isTrue, reason: 'the same moment may replace');
+    expect([(await db.cache('u1', 'my_cash'))!.body, (await db.cache('u1', 'my_cash'))!.covers], [{'held': 3}, {'o1'}]);
+  });
+
   test('R38: a saved copy keeps which sent ops it counts', () async {
     await db.putCache('u1', 'my_cash', const {'held': 1}, now, covers: ['o1', 'o2']);
     expect((await db.cache('u1', 'my_cash'))!.covers, {'o1', 'o2'});

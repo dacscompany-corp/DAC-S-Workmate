@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -321,6 +322,164 @@ void main() {
       await repo.pay('pu1', pay());
       await repo.discardAction('id1');
       expect(await db.ops('u1'), hasLength(1));
+    });
+  });
+
+  group('F3 (0.8.1): one refresh, one time limit; a late answer changes nothing', () {
+    PurchasingRepository repoWith({Duration deadline = const Duration(seconds: 20), DateTime Function()? now}) => PurchasingRepository(
+          db: db,
+          remote: remote,
+          device: FakeDevice(),
+          scheduler: FakeScheduler(),
+          currentUserId: () => user,
+          companyOf: (_) => 'o1',
+          photoDir: () async => dir,
+          sendNow: () async => kicks++,
+          onBuyingOff: () async => turnedOff++,
+          now: now ?? () => wednesday,
+          newId: () => 'id${++ids}',
+          refreshDeadline: deadline,
+        );
+
+    test('a read slower than the time limit: the saved copy, on time — and its late answer writes nothing', () async {
+      final slow = repoWith(deadline: const Duration(milliseconds: 100));
+      await slow.myCash();
+      final gate = Completer<void>();
+      remote.duringRead = () => gate.future;
+      remote.cash = {...remote.cash, 'recorded': 999, 'held': 999};
+      final clock = Stopwatch()..start();
+      final v = await slow.myCash();
+      expect(clock.elapsed, lessThan(const Duration(seconds: 2)), reason: 'it gives up at the time limit');
+      expect([v.fromCache, v.cash!.held, PurFailure.of(v.error!)], [true, 1470, PurFailure.noConnection]);
+      gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(((await db.cache('u1', 'my_cash'))!.body as Map)['held'], 1470, reason: 'the late answer is thrown away');
+    });
+
+    test('an older refresh that answers after a newer one never overwrites the newer saved copy', () async {
+      var clock = wednesday;
+      final r = repoWith(now: () => clock);
+      final reached = Completer<void>();
+      final gate = Completer<void>();
+      var first = true;
+      remote.duringRead = () async {
+        if (!first) return;
+        first = false;
+        reached.complete();
+        await gate.future;
+      };
+      final older = r.myCash();
+      await reached.future;
+      clock = wednesday.add(const Duration(minutes: 1));
+      remote.cash = {...remote.cash, 'recorded': 1000, 'held': 1000};
+      expect((await r.myCash()).cash!.held, 1000);
+      remote.cash = {...remote.cash, 'recorded': 5, 'held': 5};
+      gate.complete();
+      await older;
+      final saved = await db.cache('u1', 'my_cash');
+      expect([(saved!.body as Map)['held'], saved.at], [1000, clock], reason: 'the saved copy stays the newer read');
+    });
+
+    test('My purchases and its cash card: read at the same time, one check before and one after', () async {
+      await repo.pay('pu1', pay(amount: '100'));
+      remote.duringRead = () => Future<void>.delayed(const Duration(milliseconds: 20));
+      final both = await repo.myPurchasesAndCash();
+      expect(remote.maxInFlight, 2, reason: 'the list and the cash at the same time');
+      expect(remote.calls.where((c) => c.startsWith('opsDone')), hasLength(2), reason: 'one check each side of the reads, not one per read');
+      expect([both.purchases.fromCache, both.cash.fromCache, both.purchases.unsentFor('pu1'), both.cash.unsentPettyCash], [false, false, 100, 100]);
+      final list = await db.cache('u1', 'my_purchases');
+      final cash = await db.cache('u1', 'my_cash');
+      expect([list!.at, list.covers], [cash!.at, cash.covers], reason: 'both saved copies count the same sent payments');
+    });
+
+    test('a payment sent during the shared refresh is counted exactly once, on the list and the card (R38)', () async {
+      await repo.pay('pu1', pay(amount: '300'));
+      var once = true;
+      remote.duringRead = () async {
+        if (!once) return;
+        once = false;
+        await sync.drain('u1');
+        remote.cash = {...remote.cash, 'recorded': 1170, 'held': 1170};
+      };
+      final both = await repo.myPurchasesAndCash();
+      expect([both.purchases.unsentFor('pu1'), both.cash.unsentPettyCash, both.cash.figures!.held], [0, 0, 1170]);
+      expect(remote.calls.where((c) => c == 'myCash'), hasLength(2), reason: 'it went during the read: read again');
+      final list = await db.cache('u1', 'my_purchases');
+      final cash = await db.cache('u1', 'my_cash');
+      expect([list!.covers, cash!.covers], [{'id1'}, {'id1'}], reason: 'both saved copies count it');
+      expect(await db.sentOps('u1'), isEmpty, reason: 'both count it: forgotten');
+    });
+
+    test('only the cash part fails: the purchases still fresh, the card on its saved copy', () async {
+      await repo.myPurchasesAndCash();
+      remote.cash = {...remote.cash, 'recorded': 999, 'held': 999};
+      remote.cashError = const SocketException('cash down');
+      final both = await repo.myPurchasesAndCash();
+      expect([both.purchases.fromCache, both.purchases.error, both.cash.fromCache, both.cash.cash!.held], [false, isNull, true, 1470]);
+    });
+
+    test('no signal at all: both from their saved copies, saying so', () async {
+      await repo.myPurchasesAndCash();
+      remote.readError = const SocketException('down');
+      final both = await repo.myPurchasesAndCash();
+      expect([both.purchases.fromCache, both.cash.fromCache, both.cash.cash!.held], [true, true, 1470]);
+    });
+
+    test('the time limit covers a purchase\'s payments too', () async {
+      final slow = repoWith(deadline: const Duration(milliseconds: 100));
+      final gate = Completer<void>();
+      remote.duringRead = () => gate.future;
+      await expectLater(slow.purchasePayments('pu1'), throwsA(predicate((Object e) => PurFailure.of(e) == PurFailure.noConnection)));
+      gate.complete();
+    });
+
+    test('rev 2: a purchase\'s screen with both calls stalled — one time limit for the whole load; what is on the phone still shows', () async {
+      final slow = repoWith(deadline: const Duration(milliseconds: 100));
+      await slow.pay('pu1', pay(amount: '100'));
+      final purchaseGate = Completer<void>();
+      final paymentsGate = Completer<void>();
+      remote.duringPurchase = () => purchaseGate.future;
+      remote.duringRead = () => paymentsGate.future;
+      final clock = Stopwatch()..start();
+      final s = await slow.purchaseScreen('pu1').timeout(const Duration(seconds: 5));
+      expect(clock.elapsed, lessThan(const Duration(seconds: 2)), reason: 'one limit, not one per call');
+      expect([s.detail, PurFailure.of(s.purchaseError!), s.payments, [for (final q in s.queued) q.amount]], [isNull, PurFailure.noConnection, isNull, [100]]);
+      purchaseGate.complete();
+      paymentsGate.complete();
+    });
+
+    test('rev 2: a purchase\'s screen asks for the purchase and its payments at the same time', () async {
+      remote.duringPurchase = () async {
+        while (!remote.calls.contains('payments:pu1')) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+      };
+      final s = await repoWith(deadline: const Duration(seconds: 2)).purchaseScreen('pu1');
+      expect([s.detail?.id, s.payments?.pay.pay.state, s.purchaseError], ['pu1', 'unpaid', isNull], reason: 'the purchase waited for the payments call to start');
+    });
+
+    test('rev 2: the saved list and cash at once, with no server call', () async {
+      await repo.myPurchasesAndCash();
+      await repo.pay('pu1', pay(amount: '100'));
+      remote.calls.clear();
+      remote.readError = const SocketException('down');
+      final saved = await repo.savedPurchasesAndCash();
+      expect(remote.calls, isEmpty);
+      expect([saved.purchases.fromCache, saved.cash.fromCache, saved.cash.cash!.held, saved.purchases.unsentFor('pu1'), saved.purchases.error],
+          [true, true, 1470, 100, isNull]);
+    });
+
+    test('a check that answers after the time limit marks nothing sent', () async {
+      final slow = repoWith(deadline: const Duration(milliseconds: 100));
+      await slow.pay('pu1', pay(amount: '300'));
+      remote.accepted.add('id1');
+      final gate = Completer<void>();
+      remote.duringOpsDone = () => gate.future;
+      final v = await slow.myCash();
+      expect(v.error, isNotNull);
+      gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect([await db.sentOps('u1'), await db.ops('u1')], [isEmpty, hasLength(1)], reason: 'the background send settles it');
     });
   });
 

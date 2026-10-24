@@ -316,6 +316,58 @@ void main() {
       expect(find.byKey(const Key('pay-line-pu2')), findsNothing, reason: 'Q2: payment not tracked');
     });
 
+    testWidgets('F1: a voided purchase with nothing paid says "Voided" once — no payment tag; one paid still says what to recover', (tester) async {
+      api.mine = MyPurchasesView(purchases: [
+        row('pu1', {'state': 'void', 'tracked': true, 'due': 0}, status: 'void'),
+        row('pu2', {'state': 'void_paid', 'tracked': true, 'due': 0, 'paid': 50, 'unresolved': 50}, status: 'void'),
+      ]);
+      await open(tester);
+      expect(find.byKey(const Key('pay-line-pu1')), findsNothing);
+      expect(find.text('Void'), findsNothing);
+      expect(find.byKey(const Key('pay-line-pu2')), findsOneWidget);
+      expect(find.text('Voided — paid, to recover'), findsOneWidget);
+    });
+
+    testWidgets('rev 2: the saved list and card show at once while the network stays blocked', (tester) async {
+      api.savedMine = MyPurchasesView(purchases: [row('pu9', {'state': 'paid', 'tracked': true, 'due': 1000, 'paid': 1000})], fromCache: true);
+      api.savedCash = const MyCashView(cash: MyCash(holder: true, recorded: 7, held: 7), fromCache: true);
+      final blocked = Completer<void>();
+      api.refreshGates.add(blocked);
+      final c = MyPurchasesController(api: api);
+      final pending = c.refresh();
+      useTallPhone(tester);
+      await tester.pumpWidget(MaterialApp(
+        theme: workMateTheme(),
+        home: Scaffold(body: MyPurchasesScreen(controller: c, onOpenDraft: (_) {}, onOpenPurchase: (_) {}, services: services)),
+      ));
+      await tester.pump();
+      expect(find.byKey(const Key('pay-line-pu9')), findsOneWidget, reason: 'the saved purchase, before the network answers');
+      expect(find.text('₱7.00'), findsOneWidget, reason: 'the saved card');
+      expect(c.loading, isTrue);
+      blocked.complete();
+      await pending;
+      await tester.pump();
+      expect(find.byKey(const Key('pay-line-pu9')), findsNothing, reason: 'the fresh answer replaces it');
+    });
+
+    testWidgets('F3: a refresh that finishes after a newer one changes nothing', (tester) async {
+      final c = MyPurchasesController(api: api);
+      final slow = Completer<void>();
+      api.refreshGates.add(slow);
+      api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 1, held: 1));
+      final older = c.refresh();
+      // Let the older refresh ask (and so take the old answer) before the cash changes.
+      while (!api.calls.contains('myPurchasesAndCash')) {
+        await tester.pump();
+      }
+      api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 2, held: 2));
+      await c.refresh();
+      expect([c.cash.cash!.held, c.loading], [2, false]);
+      slow.complete();
+      await older;
+      expect([c.cash.cash!.held, c.loading], [2, false], reason: 'the older answer is dropped');
+    });
+
     testWidgets('R38: on My purchases a sent payment is "not in this list yet", never "waiting to send"', (tester) async {
       api.mine = MyPurchasesView(
         purchases: [row('pu1', {'state': 'partial', 'tracked': true, 'due': 1000, 'paid': 300, 'balance': 700})],
@@ -460,6 +512,39 @@ void main() {
       expect(api.calls.where((c) => c.startsWith('discardPhoto')), isEmpty, reason: 'the queue owns the photo now');
     });
 
+    testWidgets('rev 2: My cash shows its saved cash at once while the network stays blocked', (tester) async {
+      final blocked = Completer<void>();
+      api.cashGates.add(blocked);
+      api.savedCash = const MyCashView(cash: MyCash(holder: true, recorded: 7, held: 7), fromCache: true);
+      api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 9, held: 9));
+      useTallPhone(tester);
+      await tester.pumpWidget(MaterialApp(theme: workMateTheme(), home: MyCashScreen(services: services)));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('₱7.00'), findsOneWidget);
+      blocked.complete();
+      await tester.pumpAndSettle();
+      expect([find.text('₱9.00').evaluate().length, find.text('₱7.00').evaluate().length], [1, 0]);
+    });
+
+    testWidgets('F3: an older load that finishes after a pull to refresh changes nothing', (tester) async {
+      final slow = Completer<void>();
+      api.cashGates.add(slow);
+      api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 1, held: 1));
+      useTallPhone(tester);
+      await tester.pumpWidget(MaterialApp(theme: workMateTheme(), home: MyCashScreen(services: services)));
+      await tester.pump();
+      api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 2, held: 2));
+      unawaited(tester.state<RefreshIndicatorState>(find.byType(RefreshIndicator)).show());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('₱2.00'), findsOneWidget);
+      slow.complete();
+      await tester.pumpAndSettle();
+      expect([find.text('₱2.00').evaluate().length, find.text('₱1.00').evaluate().length], [1, 0], reason: 'the older answer is dropped');
+    });
+
     testWidgets('never read and no signal: it says to connect once', (tester) async {
       api.cash = const MyCashView();
       await show(tester, MyCashScreen(services: services));
@@ -538,6 +623,79 @@ void main() {
       await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
       expect(find.text('Recorded before payments were tracked.'), findsOneWidget);
       expect(find.byKey(const Key('detail-pay')), findsNothing);
+    });
+
+    testWidgets('F2: no signal to open a purchase: it says a payment can still be recorded from the list', (tester) async {
+      api.error = const SocketException('down');
+      await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
+      expect(find.text('No signal right now. Try again in a moment.'), findsOneWidget);
+      expect(find.byKey(const Key('detail-offline-hint')), findsOneWidget);
+      expect(find.textContaining('You can still record a payment from My purchases'), findsOneWidget);
+    });
+
+    testWidgets('F3: an older load of a purchase that finishes last changes nothing', (tester) async {
+      api.detail = PurchaseDetail.fromJson(const {'id': 'pu1', 'status': 'recorded', 'supplier': 'ZZ Hardware', 'receipt_total': 1000});
+      PurchasePayments state(String s, double paid) => PurchasePayments.fromJson({
+            'pay': {'state': s, 'tracked': true, 'due': 1000, 'paid': paid, 'balance': 1000 - paid},
+            'payments': [],
+            'me': {'holder': true},
+          });
+      api.payments = state('unpaid', 0);
+      await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
+      expect(find.text('Unpaid'), findsOneWidget);
+      // Each saved payment reloads the screen: two in a row, the first reload slow.
+      Future<void> recordPayment() async {
+        await tester.ensureVisible(find.byKey(const Key('detail-pay')));
+        await tester.tap(find.byKey(const Key('detail-pay')));
+        await tester.pumpAndSettle();
+        await reach(tester, find.byKey(const Key('pay-save')), list: const Key('pay-form'));
+        await tester.tap(find.byKey(const Key('pay-save')));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+      }
+
+      final slow = Completer<void>();
+      api.paymentsGates.add(slow);
+      api.payments = state('partial', 300);
+      await recordPayment();
+      api.payments = state('paid', 1000);
+      await recordPayment();
+      await tester.pumpAndSettle();
+      expect(find.text('Paid'), findsOneWidget);
+      slow.complete();
+      await tester.pumpAndSettle();
+      expect([find.text('Paid').evaluate().length, find.text('Partially paid').evaluate().length], [1, 0], reason: 'the older answer is dropped');
+    });
+
+    testWidgets('rev 3: a reload whose payments read fails shows "needs signal" — never the earlier balance beside a newer queue', (tester) async {
+      api.detail = PurchaseDetail.fromJson(const {'id': 'pu1', 'status': 'recorded', 'supplier': 'ZZ Hardware', 'receipt_total': 1000});
+      api.payments = PurchasePayments.fromJson({
+        'pay': {'state': 'unpaid', 'tracked': true, 'due': 1000, 'paid': 0, 'balance': 1000},
+        'payments': [],
+        'me': {'holder': true},
+      });
+      await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
+      expect(find.text('Receipt ₱1,000.00 · paid ₱0.00 · left ₱1,000.00'), findsOneWidget);
+      // A payment is sent and the saved list now counts it; the next payments read fails.
+      await tester.ensureVisible(find.byKey(const Key('detail-pay')));
+      await tester.tap(find.byKey(const Key('detail-pay')));
+      await tester.pumpAndSettle();
+      api.queuedFor = const [
+        QueuedCashAction(opId: 'op1', kind: opPay, body: {'purchase_id': 'pu1', 'payment': {'amount': '1000.00', 'source': 'petty_cash'}}, state: QueuedState.sent),
+      ];
+      api.paymentsError = const SocketException('down');
+      await reach(tester, find.byKey(const Key('pay-save')), list: const Key('pay-form'));
+      await tester.tap(find.byKey(const Key('pay-save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('payments-offline')), findsOneWidget, reason: 'needs signal');
+      expect(find.textContaining('left ₱'), findsNothing, reason: 'no balance from the earlier read');
+      expect(find.byKey(const Key('detail-pay')), findsNothing, reason: 'no payment offered on a mismatched balance');
+    });
+
+    testWidgets('F2: any other reason it cannot open: no such hint', (tester) async {
+      api.error = const PurFailureException(PurFailure.notFound);
+      await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
+      expect(find.byKey(const Key('detail-offline-hint')), findsNothing);
     });
 
     testWidgets('no signal for the payments: the purchase still shows', (tester) async {

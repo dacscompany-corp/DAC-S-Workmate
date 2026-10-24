@@ -78,6 +78,21 @@ class PurchasePaymentsView {
   final List<QueuedCashAction> queued;
 }
 
+/// F3 (rev 2): a purchase's screen, read in one load under one time limit:
+/// the purchase (or why it could not be read), its payments if they could be
+/// read, and the payments on this phone those do not count.
+class PurchaseScreenView {
+  const PurchaseScreenView({this.detail, this.purchaseError, this.payments, this.queued = const []});
+  final PurchaseDetail? detail;
+
+  /// Why [detail] is missing (no signal, gone, …); null when it is there.
+  final Object? purchaseError;
+
+  /// Null when the payments could not be read: "needs signal".
+  final PurchasePaymentsView? payments;
+  final List<QueuedCashAction> queued;
+}
+
 /// My purchases (Q12): what is still on the phone, then the server's list.
 class MyPurchasesView {
   const MyPurchasesView(
@@ -233,6 +248,18 @@ abstract interface class PurchasingApi {
 
   /// The buyer's own cash: fresh when online, the saved copy offline.
   Future<MyCashView> myCash();
+
+  /// F3 (0.8.1): My purchases and its My cash card in one refresh, read at
+  /// the same time and given up after a set time (then the saved copies).
+  Future<({MyPurchasesView purchases, MyCashView cash})> myPurchasesAndCash();
+
+  /// F3 (rev 2): the saved list and cash, with what is still on the phone,
+  /// at once and with no server call.
+  Future<({MyPurchasesView purchases, MyCashView cash})> savedPurchasesAndCash();
+
+  /// F3 (rev 2): a purchase and its payments, asked at the same time, under
+  /// one time limit for both.
+  Future<PurchaseScreenView> purchaseScreen(String purchaseId);
 
   /// One purchase's payments and what this account may pay with, with the
   /// payments on this phone it does not count. Online only.

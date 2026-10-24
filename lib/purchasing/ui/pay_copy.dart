@@ -64,6 +64,13 @@ const reportReturnLabel = Bilingual('Report a return', 'Iulat ang ibinalik');
 const notReceivedLabel = Bilingual('I did not receive this', 'Hindi ko ito natanggap');
 const waitingToSendPayLabel = Bilingual('Waiting to send', 'Hinihintay maipadala');
 
+/// F2 (0.8.1): a purchase cannot be opened with no signal, but a payment can
+/// still be recorded from the list.
+const payFromListHint = Bilingual(
+  'You can still record a payment from My purchases: tap "Record payment" on the purchase. It is saved on this phone and sent when there is signal.',
+  'Maaari ka pa ring magtala ng bayad mula sa Mga binili ko: pindutin ang "Record payment" sa purchase. Mase-save ito sa phone at ipapadala kapag may signal.',
+);
+
 /// "Unreconciled shortfall ₱530 — paid beyond the petty cash recorded" (Q16).
 Bilingual shortfallCopy(String amount) => Bilingual('Shortfall $amount — paid beyond the petty cash recorded. The owner checks it.',
     'Kulang na $amount — lumampas ang bayad sa petty cash na naitala. Susuriin ng may-ari.');

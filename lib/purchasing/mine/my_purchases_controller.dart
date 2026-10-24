@@ -28,22 +28,45 @@ class MyPurchasesController extends ChangeNotifier {
       view.queuedPayments.where((q) => q.state == QueuedState.needsAttention).length +
       cash.queuedReturns.where((q) => q.state == QueuedState.needsAttention).length;
 
+  /// Refreshes started so far; only the latest may change what is shown.
+  int _refreshes = 0;
+
+  /// A refresh has answered (fresh, or its saved copy after the time limit).
+  /// Until then the saved copy is shown at once.
+  bool _answered = false;
+
+  /// F3 (0.8.1): the list and the card in one refresh (read at the same
+  /// time, with one time limit). A refresh that finishes after a newer one
+  /// started changes nothing: its answer is older.
   Future<void> refresh() async {
+    final mine = ++_refreshes;
     loading = true;
     notifyListeners();
     try {
-      drafts = await api.drafts();
-      view = await api.myPurchases();
-      try {
-        cash = await api.myCash();
-      } catch (_) {
-        // The card waits for the first read; the purchases still show.
+      final d = await api.drafts();
+      if (mine == _refreshes) drafts = d;
+      // F3 (rev 2): what the phone already has, at once — the list never
+      // waits for the network (opening the app with no signal).
+      if (!_answered) {
+        final saved = await api.savedPurchasesAndCash();
+        if (mine == _refreshes && !_answered) {
+          view = saved.purchases;
+          cash = saved.cash;
+          notifyListeners();
+        }
       }
+      final both = await api.myPurchasesAndCash();
+      if (mine != _refreshes) return;
+      view = both.purchases;
+      cash = both.cash;
+      _answered = true;
     } catch (e) {
-      notice = purFailureCopy(PurFailure.of(e));
+      if (mine == _refreshes) notice = purFailureCopy(PurFailure.of(e));
     } finally {
-      loading = false;
-      notifyListeners();
+      if (mine == _refreshes) {
+        loading = false;
+        notifyListeners();
+      }
     }
   }
 

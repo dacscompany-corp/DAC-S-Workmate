@@ -30,7 +30,13 @@ class PurchaseDetailScreen extends StatefulWidget {
 class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   PurchaseDetail? _p;
   Bilingual? _error;
+
+  /// F2 (0.8.1): the purchase itself could not be read for want of signal.
+  bool _offline = false;
   bool _changed = false;
+
+  /// Loads started so far: an older one that finishes last changes nothing (F3).
+  int _loads = 0;
 
   /// Its payments (0102), read online beside the purchase; their own failure
   /// never hides the purchase.
@@ -51,32 +57,44 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _error = null);
+    final mine = ++_loads;
+    bool current() => mounted && mine == _loads;
+    setState(() {
+      _error = null;
+      _offline = false;
+    });
+    // F3 (rev 2): the purchase and its payments at the same time, under one
+    // time limit (R38: the payments and what is still on the phone from one
+    // read). A failed payments read shows as "needs signal" in the Payments
+    // part only; what is on the phone still shows.
+    final PurchaseScreenView s;
     try {
-      final p = await widget.services.api.purchase(widget.purchaseId);
-      if (mounted) setState(() => _p = p);
+      s = await widget.services.api.purchaseScreen(widget.purchaseId);
     } catch (e) {
-      if (mounted) setState(() => _error = purFailureCopy(PurFailure.of(e)));
-    }
-    try {
-      // R38: the payments and what is still on the phone, from one read.
-      final v = await widget.services.api.purchasePayments(widget.purchaseId);
-      if (mounted) {
+      final f = PurFailure.of(e);
+      if (current()) {
         setState(() {
-          _pay = v.pay;
-          _queued = v.queued;
+          _error = purFailureCopy(f);
+          _offline = f == PurFailure.noConnection;
         });
       }
-    } catch (_) {
-      // Shown as "needs signal" in the Payments part only; what is on the
-      // phone still shows.
-      try {
-        final queued = await widget.services.api.queuedPayments(widget.purchaseId);
-        if (mounted) setState(() => _queued = queued);
-      } catch (_) {
-        // Nothing on the phone to show.
-      }
+      return;
     }
+    if (!current()) return;
+    setState(() {
+      if (s.detail case final p?) {
+        _p = p;
+      } else {
+        final f = PurFailure.of(s.purchaseError ?? const PurFailureException(PurFailure.noConnection));
+        _error = purFailureCopy(f);
+        _offline = f == PurFailure.noConnection;
+      }
+      // The balance and what is on the phone always come from the same load
+      // (R38, 0.8.1 rev 3): a payments read that failed shows "needs signal",
+      // never an earlier balance beside payments counted against another list.
+      _pay = s.payments?.pay;
+      _queued = s.queued;
+    });
   }
 
   Future<void> _recordPayment(PurchaseDetail p, PurchasePayments pay) async {
@@ -206,9 +224,16 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
         appBar: AppBar(title: const Text('Purchase')),
         body: SafeArea(
           child: _error != null && p == null
-              ? Padding(
+              ? ListView(
                   padding: const EdgeInsets.all(16),
-                  child: FailureNotice(english: _error!.english, tagalog: _error!.tagalog, actions: [noticeAction('Try again · Subukan ulit', _load)]),
+                  children: [
+                    FailureNotice(english: _error!.english, tagalog: _error!.tagalog, actions: [noticeAction('Try again · Subukan ulit', _load)]),
+                    // F2 (0.8.1): what still works with no signal.
+                    if (_offline) ...[
+                      const SizedBox(height: 12),
+                      const BilingualText(payFromListHint, key: Key('detail-offline-hint'), style: TextStyle(fontSize: 13.5, color: WmColors.textSecondary)),
+                    ],
+                  ],
                 )
               : p == null
                   ? const Center(child: CircularProgressIndicator())

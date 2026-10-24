@@ -130,7 +130,9 @@ class MyPurchasesScreen extends StatelessWidget {
                             style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
                         const SizedBox(height: 6),
                         Wrap(spacing: 6, runSpacing: 6, children: [for (final f in purchaseFlags(p)) _Flag(f)]),
-                        if (p.pay.tracked || p.pay.state != 'not_tracked') _PayLine(p: p, unsent: v.unsentFor(p.id), anySent: v.sentFor(p.id), onPay: services == null ? null : () => _pay(context, p)),
+                        // F1 (0.8.1): a voided purchase with nothing paid already says
+                        // "Voided"; only "Voided — paid, to recover" adds anything.
+                        if ((p.pay.tracked || p.pay.state != 'not_tracked') && p.pay.state != 'void') _PayLine(p: p, unsent: v.unsentFor(p.id), anySent: v.sentFor(p.id), onPay: services == null ? null : () => _pay(context, p)),
                       ]),
                     ),
                   ),

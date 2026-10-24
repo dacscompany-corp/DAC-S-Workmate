@@ -159,11 +159,54 @@ class FakePurchasingApi implements PurchasingApi {
   @override
   String today() => todayIs;
 
+  /// F3: each My cash load waits for the next of these, if any (a slow load),
+  /// and answers what [cash] held when it began.
+  final cashGates = <Completer<void>>[];
+
   @override
   Future<MyCashView> myCash() async {
     calls.add('myCash');
     _maybeFail();
-    return cash;
+    final answer = cash;
+    if (cashGates.isNotEmpty) await cashGates.removeAt(0).future;
+    return answer;
+  }
+
+  /// F3 (rev 2): what the phone has saved, shown at once.
+  MyPurchasesView savedMine = const MyPurchasesView();
+  MyCashView savedCash = const MyCashView();
+
+  @override
+  Future<({MyPurchasesView purchases, MyCashView cash})> savedPurchasesAndCash() async {
+    calls.add('saved');
+    return (purchases: savedMine, cash: savedCash);
+  }
+
+  /// F3 (rev 2): the purchase and its payments at the same time, as the
+  /// repository asks them.
+  @override
+  Future<PurchaseScreenView> purchaseScreen(String purchaseId) async {
+    PurchaseDetail? d;
+    Object? e;
+    PurchasePaymentsView? p;
+    await Future.wait([
+      purchase(purchaseId).then<void>((v) => d = v, onError: (Object x) => e = x),
+      purchasePayments(purchaseId).then<void>((v) => p = v, onError: (Object _) {}),
+    ]);
+    return PurchaseScreenView(detail: d, purchaseError: d == null ? e : null, payments: p, queued: p?.queued ?? await queuedPayments(purchaseId));
+  }
+
+  /// F3: each My purchases refresh waits for the next of these, if any (a slow
+  /// refresh). It answers what [mine] and [cash] held when it began.
+  final refreshGates = <Completer<void>>[];
+
+  @override
+  Future<({MyPurchasesView purchases, MyCashView cash})> myPurchasesAndCash() async {
+    calls.add('myPurchasesAndCash');
+    _maybeFail();
+    final answer = (purchases: mine, cash: cash);
+    if (refreshGates.isNotEmpty) await refreshGates.removeAt(0).future;
+    return answer;
   }
 
   /// Thrown by every purchasePayments read while set (the purchase itself still reads).
@@ -175,8 +218,14 @@ class FakePurchasingApi implements PurchasingApi {
     final e = paymentsError;
     if (e != null) throw e;
     _maybeFail();
-    return PurchasePaymentsView(pay: payments, queued: [for (final q in queuedFor) if (q.purchaseId == purchaseId) q]);
+    final answer = PurchasePaymentsView(pay: payments, queued: [for (final q in queuedFor) if (q.purchaseId == purchaseId) q]);
+    if (paymentsGates.isNotEmpty) await paymentsGates.removeAt(0).future;
+    return answer;
   }
+
+  /// F3: each read of a purchase's payments waits for the next of these, if
+  /// any, and answers what [payments] held when it began.
+  final paymentsGates = <Completer<void>>[];
 
   @override
   Future<List<QueuedCashAction>> queuedPayments(String purchaseId) async => [for (final q in queuedFor) if (q.purchaseId == purchaseId) q];

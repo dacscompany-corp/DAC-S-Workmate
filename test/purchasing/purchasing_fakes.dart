@@ -94,6 +94,19 @@ class FakePurchasingRemote implements PurchasingRemote {
   /// that happens while the read is under way (the background send).
   Future<void> Function()? duringRead;
 
+  /// F3: balance reads under way at once, and the most there ever were.
+  int inFlight = 0;
+  int maxInFlight = 0;
+
+  /// F3: thrown by pur_my_cash only, while set.
+  Object? cashError;
+
+  /// F3: run inside pur_my_ops_done while set, before it answers (a slow check).
+  Future<void> Function()? duringOpsDone;
+
+  /// F3 (rev 2): run inside pur_purchase while set, before it answers.
+  Future<void> Function()? duringPurchase;
+
   /// Thrown by pur_my_ops_done only, while set.
   Object? opsDoneError;
 
@@ -108,8 +121,14 @@ class FakePurchasingRemote implements PurchasingRemote {
   Future<void> _balance() async {
     _read();
     if (balanceError != null) throw balanceError!;
-    final f = duringRead;
-    if (f != null) await f();
+    inFlight++;
+    if (inFlight > maxInFlight) maxInFlight = inFlight;
+    try {
+      final f = duringRead;
+      if (f != null) await f();
+    } finally {
+      inFlight--;
+    }
   }
 
   void _write() {
@@ -173,6 +192,9 @@ class FakePurchasingRemote implements PurchasingRemote {
   @override
   Future<Map<String, dynamic>> purchase(String id) async {
     _read();
+    calls.add('purchase:$id');
+    final slow = duringPurchase;
+    if (slow != null) await slow();
     return detail;
   }
 
@@ -220,6 +242,7 @@ class FakePurchasingRemote implements PurchasingRemote {
   Future<Map<String, dynamic>> myCash() async {
     await _balance();
     calls.add('myCash');
+    if (cashError != null) throw cashError!;
     return cash;
   }
 
@@ -235,6 +258,8 @@ class FakePurchasingRemote implements PurchasingRemote {
     _read();
     if (opsDoneError != null) throw opsDoneError!;
     calls.add('opsDone:${opIds.length}');
+    final slow = duringOpsDone;
+    if (slow != null) await slow();
     return [for (final id in opIds) if (accepted.contains(id)) id];
   }
 

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:workmate/auth/worker_profile.dart';
 import 'package:workmate/profile/account_services.dart';
 import 'package:workmate/purchasing/data/purchasing_api.dart';
+import 'package:workmate/purchasing/domain/pur_models.dart' show PurBatch;
 import 'package:workmate/purchasing/domain/purchase_draft.dart';
 import 'package:workmate/purchasing/purchasing_services.dart';
 import 'package:workmate/purchasing/ui/buyer_shell.dart';
@@ -106,8 +107,12 @@ void main() {
     late FakePurchasingApi api;
 
     setUp(() {
+      // The shell's shopping list reads the real clock: this week's cutoff
+      // must lie ahead of whenever the test runs (it failed once the fixed
+      // 24 Oct cutoff passed).
+      final liveWeek = PurBatch(id: 'b1', cutoffAt: DateTime.now().toUtc().add(const Duration(days: 3)), purchaseOn: '2026-10-26');
       api = FakePurchasingApi()
-        ..shopping = ShoppingView(lines: [cement(portions: [portion('p1', buyer: 'u1', mine: true)])], batches: [thisWeek], fetchedAt: wednesday);
+        ..shopping = ShoppingView(lines: [cement(portions: [portion('p1', buyer: 'u1', mine: true)])], batches: [liveWeek], fetchedAt: wednesday);
     });
 
     Future<void> open(WidgetTester tester) async {

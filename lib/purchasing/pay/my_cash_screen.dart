@@ -95,12 +95,21 @@ class _MyCashScreenState extends State<MyCashScreen> {
     _load();
   }
 
+  /// Loads started so far: an older one that finishes last changes nothing (F3).
+  int _loads = 0;
+
   Future<void> _load() async {
+    final mine = ++_loads;
     try {
+      // F3 (rev 2): the saved cash at once, never a wait for the network.
+      if (_view == null) {
+        final saved = (await _api.savedPurchasesAndCash()).cash;
+        if (mounted && mine == _loads && _view == null && saved.cash != null) setState(() => _view = saved);
+      }
       final v = await _api.myCash();
-      if (mounted) setState(() => _view = v);
+      if (mounted && mine == _loads) setState(() => _view = v);
     } catch (e) {
-      if (mounted) setState(() => _notice = purFailureCopy(PurFailure.of(e)));
+      if (mounted && mine == _loads) setState(() => _notice = purFailureCopy(PurFailure.of(e)));
     }
   }
 

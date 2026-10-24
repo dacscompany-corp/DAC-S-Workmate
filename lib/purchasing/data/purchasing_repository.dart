@@ -34,6 +34,7 @@ class PurchasingRepository implements PurchasingApi {
     this.onBuyingOff,
     DateTime Function()? now,
     String Function()? newId,
+    this.refreshDeadline = const Duration(seconds: 20),
   })  : _now = now ?? DateTime.now,
         _newId = newId ?? newEventId;
 
@@ -59,6 +60,10 @@ class PurchasingRepository implements PurchasingApi {
 
   /// The server said BUYER_REQUIRED (R2): the app shows Buying is turned off.
   final Future<void> Function()? onBuyingOff;
+
+  /// F3 (0.8.1): the longest one refresh may take, every server call and
+  /// every round in it. After that the saved copy is shown, saying so.
+  final Duration refreshDeadline;
   final DateTime Function() _now;
   final String Function() _newId;
 
@@ -250,29 +255,70 @@ class PurchasingRepository implements PurchasingApi {
   @override
   Future<MyPurchasesView> myPurchases() async {
     final u = _user();
-    List<Map<String, dynamic>>? docs;
-    Object? error;
-    DateTime? fetchedAt;
-    var fromCache = false;
-    var counted = <String>{};
     try {
-      final (fresh, covers) = await _guard(() => _fresh(u, remote.myPurchases));
-      docs = fresh;
-      counted = covers;
-      fetchedAt = _now();
-      await db.putCache(u, 'my_purchases', fresh, fetchedAt, covers: covers);
+      final r = await _guard(() => _fresh(u, remote.myPurchases));
+      await db.putCacheIfNewer(u, 'my_purchases', r.value, r.startedAt, covers: r.covers);
       await _forgetCounted(u);
+      return _purchasesView(u, docs: r.value, counted: r.covers, fetchedAt: r.startedAt);
     } catch (e) {
       if (PurFailure.of(e) == PurFailure.buyingOff) rethrow;
-      error = e;
-      final cached = await db.cache(u, 'my_purchases');
-      if (cached != null) {
-        docs = _rows(cached.body);
-        fetchedAt = cached.at;
-        fromCache = true;
-        counted = cached.covers;
-      }
+      return _savedPurchases(u, e);
     }
+  }
+
+  /// F3 (0.8.1): My purchases and its My cash card in one refresh — the three
+  /// reads at the same time, one check of what was sent before and after
+  /// them, so both lists count the same sent payments (R38). If only the cash
+  /// part fails, the purchases still show fresh and the card its saved copy.
+  @override
+  Future<({MyPurchasesView purchases, MyCashView cash})> myPurchasesAndCash() async {
+    final u = _user();
+    try {
+      final r = await _guard(() => _fresh(u, () async {
+            // Future.wait: every read's failure is handled, whichever comes first.
+            final got = await Future.wait<Object?>([remote.myPurchases(), _orNull(remote.myCash()), _orNull(remote.credits())]);
+            return (got[0]! as List<Map<String, dynamic>>, got[1] as Map<String, dynamic>?, got[2] as List<Map<String, dynamic>>?);
+          }));
+      final (docs, mine, creditRows) = r.value;
+      await db.putCacheIfNewer(u, 'my_purchases', docs, r.startedAt, covers: r.covers);
+      if (mine != null && creditRows != null) await _saveCash(u, mine, creditRows, r.startedAt, r.covers);
+      await _forgetCounted(u);
+      return (
+        purchases: await _purchasesView(u, docs: docs, counted: r.covers, fetchedAt: r.startedAt),
+        cash: mine != null && creditRows != null
+            ? await _cashView(u,
+                cash: MyCash.fromJson(mine), credits: creditRows.map(SupplierCredit.fromJson).toList(), counted: r.covers, at: r.startedAt)
+            : await _savedCash(u, const PurFailureException(PurFailure.noConnection)),
+      );
+    } catch (e) {
+      if (PurFailure.of(e) == PurFailure.buyingOff) rethrow;
+      return (purchases: await _savedPurchases(u, e), cash: await _savedCash(u, e));
+    }
+  }
+
+  /// F3 (rev 2): what the phone already has — the saved list and cash, with
+  /// what is still on the phone — at once, with no server call, so a screen
+  /// never waits for the network before showing something.
+  @override
+  Future<({MyPurchasesView purchases, MyCashView cash})> savedPurchasesAndCash() async {
+    final u = _user();
+    return (purchases: await _savedPurchases(u, null), cash: await _savedCash(u, null));
+  }
+
+  /// A read whose failure must not sink the others in the same refresh.
+  Future<T?> _orNull<T>(Future<T> read) => read.then<T?>((v) => v, onError: (Object e) {
+        if (PurFailure.of(e) == PurFailure.buyingOff) throw e;
+        return null;
+      });
+
+  Future<MyPurchasesView> _savedPurchases(String u, Object? error) async {
+    final cached = await db.cache(u, 'my_purchases');
+    if (cached == null) return _purchasesView(u, counted: const {}, error: error);
+    return _purchasesView(u, docs: _rows(cached.body), counted: cached.covers, fetchedAt: cached.at, fromCache: true, error: error);
+  }
+
+  Future<MyPurchasesView> _purchasesView(String u,
+      {List<Map<String, dynamic>>? docs, required Set<String> counted, DateTime? fetchedAt, bool fromCache = false, Object? error}) async {
     final allOps = await _notCounted(u, counted);
     final ops = {for (final o in allOps) if (o.draftId != null) o.draftId: o};
     final drafts = [...await db.drafts(u, queued: true), ...await db.sentDrafts(u)]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -287,7 +333,7 @@ class PurchasingRepository implements PurchasingApi {
       purchases: [for (final d in docs ?? const <Map<String, dynamic>>[]) MyPurchase.fromJson(d)],
       fetchedAt: fetchedAt,
       fromCache: fromCache,
-      error: (docs == null || fromCache) ? error : null,
+      error: error,
     );
   }
 
@@ -396,12 +442,14 @@ class PurchasingRepository implements PurchasingApi {
   /// R38: an operation the server accepted but whose answer never came back
   /// is still queued here. Ask the server which queued ops it already has and
   /// mark them sent, as the sync would (never sent again, photos deleted).
-  /// Throws with no signal.
-  Future<void> _reconcile(String u) async {
+  /// Throws with no signal. An answer that comes after the refresh gave up
+  /// ([expired]) marks nothing (F3): the background send settles it.
+  Future<void> _reconcile(String u, [bool Function()? expired]) async {
     final live = [for (final o in await db.ops(u)) if (!o.failedPermanently) o];
     for (var i = 0; i < live.length; i += 200) {
       final chunk = live.sublist(i, i + 200 > live.length ? live.length : i + 200);
       final done = (await remote.opsDone([for (final o in chunk) o.opId])).toSet();
+      if (expired?.call() ?? false) return;
       for (final o in chunk.where((o) => done.contains(o.opId))) {
         await db.markSent(o.opId, o.draftId, _now());
         for (final r in o.receipts.values) {
@@ -419,17 +467,36 @@ class PurchasingRepository implements PurchasingApi {
   /// settled after three reads, or no signal for the check after it: the
   /// read is not used, and the saved copy is shown (exact, as it says what
   /// it counts).
-  Future<(T, Set<String>)> _fresh<T>(String u, Future<T> Function() read) async {
-    for (var round = 0; round < 3; round++) {
-      await _reconcile(u);
-      final before = await _queueState(u);
-      final value = await read();
-      await _reconcile(u);
-      final after = await _queueState(u);
-      final wentDuring = {...after.sent.difference(before.sent), ...before.waiting.difference(after.waiting).difference(after.refused)};
-      if (wentDuring.isEmpty) return (value, before.sent);
+  ///
+  /// F3 (0.8.1): the whole of it — every call, every round — gives up after
+  /// [refreshDeadline], and the saved copy is shown. A read or a check that
+  /// answers after that is thrown away: it writes no saved copy, marks
+  /// nothing sent and changes nothing already shown. [startedAt] is when the
+  /// counted read began; a saved copy is only replaced by a later one.
+  Future<({T value, Set<String> covers, DateTime startedAt})> _fresh<T>(String u, Future<T> Function() read) {
+    var expired = false;
+    bool isExpired() => expired;
+    Future<({T value, Set<String> covers, DateTime startedAt})> run() async {
+      for (var round = 0; round < 3; round++) {
+        await _reconcile(u, isExpired);
+        if (expired) break;
+        final before = await _queueState(u);
+        final startedAt = _now();
+        final value = await read();
+        if (expired) break;
+        await _reconcile(u, isExpired);
+        if (expired) break;
+        final after = await _queueState(u);
+        final wentDuring = {...after.sent.difference(before.sent), ...before.waiting.difference(after.waiting).difference(after.refused)};
+        if (wentDuring.isEmpty) return (value: value, covers: before.sent, startedAt: startedAt);
+      }
+      throw const PurFailureException(PurFailure.noConnection);
     }
-    throw const PurFailureException(PurFailure.noConnection);
+
+    return run().timeout(refreshDeadline, onTimeout: () {
+      expired = true;
+      throw const PurFailureException(PurFailure.noConnection);
+    });
   }
 
   Future<({Set<String> waiting, Set<String> refused, Set<String> sent})> _queueState(String u) async {
@@ -464,34 +531,42 @@ class PurchasingRepository implements PurchasingApi {
   @override
   Future<MyCashView> myCash() async {
     final u = _user();
-    MyCash? cash;
-    var credits = const <SupplierCredit>[];
-    Object? error;
-    DateTime? at;
-    var fromCache = false;
-    var counted = <String>{};
     try {
-      final ((mine, creditRows), covers) = await _guard(() => _fresh(u, () async => (await remote.myCash(), await remote.credits())));
-      at = _now();
-      counted = covers;
-      await db.putCache(u, 'my_cash', mine, at, covers: covers);
-      await db.putCache(u, 'credits', creditRows, at, covers: covers);
+      final r = await _guard(() => _fresh(u, () async {
+            final got = await Future.wait<Object>([remote.myCash(), remote.credits()]);
+            return (got[0] as Map<String, dynamic>, got[1] as List<Map<String, dynamic>>);
+          }));
+      final (mine, creditRows) = r.value;
+      await _saveCash(u, mine, creditRows, r.startedAt, r.covers);
       await _forgetCounted(u);
-      cash = MyCash.fromJson(mine);
-      credits = creditRows.map(SupplierCredit.fromJson).toList();
+      return _cashView(u, cash: MyCash.fromJson(mine), credits: creditRows.map(SupplierCredit.fromJson).toList(), counted: r.covers, at: r.startedAt);
     } catch (e) {
       if (PurFailure.of(e) == PurFailure.buyingOff) rethrow;
-      error = e;
-      final saved = await db.cache(u, 'my_cash');
-      if (saved != null) {
-        cash = MyCash.fromJson(Map<String, dynamic>.from(saved.body as Map));
-        at = saved.at;
-        fromCache = true;
-        counted = saved.covers;
-      }
-      final savedCredits = await db.cache(u, 'credits');
-      if (savedCredits != null) credits = _rows(savedCredits.body).map(SupplierCredit.fromJson).toList();
+      return _savedCash(u, e);
     }
+  }
+
+  Future<void> _saveCash(String u, Map<String, dynamic> mine, List<Map<String, dynamic>> credits, DateTime at, Set<String> covers) async {
+    await db.putCacheIfNewer(u, 'my_cash', mine, at, covers: covers);
+    await db.putCacheIfNewer(u, 'credits', credits, at, covers: covers);
+  }
+
+  Future<MyCashView> _savedCash(String u, Object? error) async {
+    final saved = await db.cache(u, 'my_cash');
+    final savedCredits = await db.cache(u, 'credits');
+    return _cashView(
+      u,
+      cash: saved == null ? null : MyCash.fromJson(Map<String, dynamic>.from(saved.body as Map)),
+      credits: savedCredits == null ? const [] : _rows(savedCredits.body).map(SupplierCredit.fromJson).toList(),
+      counted: saved?.covers ?? const {},
+      at: saved?.at,
+      fromCache: saved != null,
+      error: error,
+    );
+  }
+
+  Future<MyCashView> _cashView(String u,
+      {MyCash? cash, List<SupplierCredit> credits = const [], required Set<String> counted, DateTime? at, bool fromCache = false, Object? error}) async {
     final ops = await _notCounted(u, counted);
     return MyCashView(
       cash: cash,
@@ -500,17 +575,46 @@ class PurchasingRepository implements PurchasingApi {
       unsentPettyCash: _unsentPetty(ops),
       fetchedAt: at,
       fromCache: fromCache,
-      error: (cash == null || fromCache) ? error : null,
+      error: error,
     );
   }
 
   @override
   Future<PurchasePaymentsView> purchasePayments(String purchaseId) async {
     final u = _user();
-    final (json, covers) = await _guard(() => _fresh(u, () => remote.purchasePayments(purchaseId)));
+    final r = await _guard(() => _fresh(u, () => remote.purchasePayments(purchaseId)));
     return PurchasePaymentsView(
-      pay: PurchasePayments.fromJson(json),
-      queued: [for (final a in _cashActions(await _notCounted(u, covers))) if (a.purchaseId == purchaseId) a],
+      pay: PurchasePayments.fromJson(r.value),
+      queued: [for (final a in _cashActions(await _notCounted(u, r.covers))) if (a.purchaseId == purchaseId) a],
+    );
+  }
+
+  /// F3 (rev 2): a purchase's screen in one load — the purchase and its
+  /// payments asked at the same time, under ONE time limit for both
+  /// ([refreshDeadline]). Whatever has not answered by then is treated as no
+  /// signal, and its late answer is dropped. What is on the phone shows
+  /// either way (with the payments read, or else with the saved list).
+  @override
+  Future<PurchaseScreenView> purchaseScreen(String purchaseId) async {
+    PurchaseDetail? detail;
+    Object? purchaseError;
+    PurchasePaymentsView? payments;
+    final asks = [
+      purchase(purchaseId).then<void>((d) => detail = d, onError: (Object e) => purchaseError = e),
+      purchasePayments(purchaseId).then<void>((v) => payments = v, onError: (Object _) {}),
+    ];
+    try {
+      await Future.wait(asks).timeout(refreshDeadline);
+    } on TimeoutException {
+      // Whatever has not answered counts as no signal.
+    }
+    final d = detail;
+    final p = payments;
+    return PurchaseScreenView(
+      detail: d,
+      purchaseError: d == null ? (purchaseError ?? const PurFailureException(PurFailure.noConnection)) : null,
+      payments: p,
+      queued: p?.queued ?? await queuedPayments(purchaseId),
     );
   }
 

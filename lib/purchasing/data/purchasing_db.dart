@@ -257,6 +257,21 @@ class PurchasingDb {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
+  /// F3 (0.8.1): replaces the saved copy only with an answer whose read
+  /// began no earlier than the saved one's — a slow answer never overwrites
+  /// a newer copy. True when written.
+  Future<bool> putCacheIfNewer(String userId, String name, Object json, DateTime at, {Iterable<String> covers = const []}) =>
+      _db.transaction((txn) async {
+        final rows = await txn.query('pur_cache', columns: ['fetched_at'], where: 'user_id = ? and name = ?', whereArgs: [userId, name], limit: 1);
+        if (rows.isNotEmpty && (rows.first['fetched_at']! as int) > at.millisecondsSinceEpoch) return false;
+        await txn.insert(
+          'pur_cache',
+          {'user_id': userId, 'name': name, 'body': jsonEncode(json), 'fetched_at': at.millisecondsSinceEpoch, 'covers': jsonEncode(covers.toList())},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        return true;
+      });
+
   Future<({Object? body, DateTime at, Set<String> covers})?> cache(String userId, String name) async {
     final rows = await _db.query('pur_cache', where: 'user_id = ? and name = ?', whereArgs: [userId, name], limit: 1);
     if (rows.isEmpty) return null;
