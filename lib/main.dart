@@ -47,6 +47,8 @@ import 'requests/data/request_remote.dart';
 import 'requests/data/request_repository.dart';
 import 'requests/data/requests_db.dart';
 import 'requests/requests_services.dart';
+import 'stock/data/stock_pending_store.dart';
+import 'stock/data/stock_remote.dart';
 import 'terms/terms_repository.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
@@ -274,7 +276,12 @@ Future<void> main() async {
     final wipe = PurchasingAccountWipe(repo);
     controller.addListener(() => wipe.onAppState(controller.state));
     wipe.onAppState(controller.state);
-    purchasing = PurchasingServices(api: repo, changed: queueSettled);
+    purchasing = PurchasingServices(
+      api: repo,
+      changed: queueSettled,
+      stock: SupabaseStockRemote(client),
+      stockStore: PrefsStockPendingStore(prefs),
+    );
   } catch (e) {
     debugPrint('Buying unavailable: $e');
   }

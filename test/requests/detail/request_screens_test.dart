@@ -49,6 +49,17 @@ void main() {
     expect(find.textContaining('URGENT · by Wed 7 Oct'), findsOneWidget);
   });
 
+  testWidgets('2B-b: what the office sent from stock shows on the line; nothing while it is 0', (tester) async {
+    api.view = RequestsView(entries: [entry(requestDoc())]);
+    await showDetail(tester, 'r1');
+    expect(find.byKey(const Key('line-from-stock-l1')), findsNothing);
+    final doc = requestDoc();
+    (doc['lines'] as List).first['from_stock'] = 4;
+    api.view = RequestsView(entries: [entry(doc)]);
+    await showDetail(tester, 'r1');
+    expect(find.text('From stock: 4 pc · Galing sa stock'), findsOneWidget);
+  });
+
   testWidgets('the requester changes a quantity; it shows as pending sync', (tester) async {
     api.view = RequestsView(entries: [entry(requestDoc())]);
     await showDetail(tester, 'r1');

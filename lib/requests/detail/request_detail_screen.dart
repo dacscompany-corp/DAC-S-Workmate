@@ -205,6 +205,10 @@ class RequestDetailScreen extends StatelessWidget {
           '${formatQuantity(p.quantity)} ${l.unit} · ${p.arranged ? 'Arranged · ' : ''}Expected ${calendarDay(p.deliveryOn)}',
           style: const TextStyle(fontSize: 13),
         ),
+      // 2B-b (0106): what the office sent from stock — quantities only.
+      if (l.fromStock > 0)
+        Text('From stock: ${formatQuantity(l.fromStock)} ${l.unit} · Galing sa stock',
+            key: Key('line-from-stock-${l.id}'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: WmColors.green)),
       if (photos.isNotEmpty) ...[
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [for (final p in photos) _RemotePhoto(key: ValueKey(p.path), api: api, path: p.path)]),

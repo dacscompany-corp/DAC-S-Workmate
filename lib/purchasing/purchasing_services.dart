@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../requests/camera/request_camera_screen.dart';
+import '../stock/data/stock_pending_store.dart';
+import '../stock/data/stock_remote.dart';
 import 'data/purchasing_api.dart';
 
 /// Opens the camera or the gallery; the chosen file's path, or null.
@@ -24,6 +26,8 @@ class PurchasingServices {
     this.changed,
     this.takePhoto = realTakeReceipt,
     this.pickPhoto = realPickReceipt,
+    this.stock,
+    this.stockStore,
   });
 
   final PurchasingApi api;
@@ -33,4 +37,11 @@ class PurchasingServices {
 
   final PickReceipt takePhoto;
   final PickReceipt pickPhoto;
+
+  /// 2B-b: the stock server; null leaves the phone as it was before stock.
+  final StockRemote? stock;
+
+  /// Where stock records wait on the phone until the server settles them
+  /// (R101, R104): the phone's settings file. Stock is offered only with both.
+  final StockPendingStore? stockStore;
 }

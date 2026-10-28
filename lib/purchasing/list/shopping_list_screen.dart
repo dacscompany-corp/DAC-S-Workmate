@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../attendance/ui/formats.dart';
 import '../../requests/domain/quantity.dart';
+import '../../stock/ui/stock_copy.dart' show fromStockLabel, issueFromStockLabel;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
 import '../domain/purchase_draft.dart';
@@ -12,12 +13,16 @@ import 'shopping_controller.dart';
 /// The shopping list on the phone (Q4–Q6). Quantities and names only: the
 /// prices of earlier purchases are never shown here.
 class ShoppingListScreen extends StatelessWidget {
-  const ShoppingListScreen({super.key, required this.controller, this.onRecord});
+  const ShoppingListScreen({super.key, required this.controller, this.onRecord, this.onIssueFromStock});
 
   final ShoppingController controller;
 
   /// Opens Record purchase with these lines; null hides the picking.
   final void Function(List<DraftPurchaseLine> lines)? onRecord;
+
+  /// 2B-b: opens Issue from stock for this line; null (stock off, or this
+  /// account may not record stock) hides the button.
+  final void Function(ShoppingEntry entry)? onIssueFromStock;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -120,7 +125,8 @@ class ShoppingListScreen extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         BilingualText(title, style: monoLabel),
         const SizedBox(height: 6),
-        for (final e in entries) _EntryCard(entry: e, kind: kind, controller: controller, canPick: onRecord != null),
+        for (final e in entries)
+          _EntryCard(entry: e, kind: kind, controller: controller, canPick: onRecord != null, onIssueFromStock: onIssueFromStock),
       ]),
     );
   }
@@ -142,11 +148,12 @@ class _Banner extends StatelessWidget {
 }
 
 class _EntryCard extends StatelessWidget {
-  const _EntryCard({required this.entry, required this.kind, required this.controller, required this.canPick});
+  const _EntryCard({required this.entry, required this.kind, required this.controller, required this.canPick, this.onIssueFromStock});
   final ShoppingEntry entry;
   final _Kind kind;
   final ShoppingController controller;
   final bool canPick;
+  final void Function(ShoppingEntry entry)? onIssueFromStock;
 
   Future<void> _claim(BuildContext context) async {
     final p = entry.portion;
@@ -202,11 +209,22 @@ class _EntryCard extends StatelessWidget {
           Row(children: [
             Expanded(child: _Number(label: neededLabel, value: qtyUnit(l.needed, l.unit))),
             Expanded(child: _Number(label: boughtLabel, value: qtyUnit(l.bought, l.unit))),
+            if (l.fromStock > 0) Expanded(child: _Number(key: Key('from-stock-${p.id}'), label: fromStockLabel, value: qtyUnit(l.fromStock, l.unit))),
             Expanded(child: _Number(label: stillToBuyLabel, value: qtyUnit(p.stillToBuy, l.unit), strong: true)),
           ]),
+          // A hint, not a reservation (Q9): someone may issue it first.
+          if (l.inWarehouse > 0) ...[
+            const SizedBox(height: 6),
+            Text('In warehouse: ${qtyUnit(l.inWarehouse, l.inWarehouseUnit)}',
+                key: Key('in-warehouse-${p.id}'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: WmColors.green)),
+          ],
           if (l.notes.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(l.notes, style: const TextStyle(fontSize: 13, color: WmColors.textSecondary)),
+          ],
+          if (kind != _Kind.others && onIssueFromStock != null && l.inWarehouse > 0 && l.catalogItemId != null && !busy) ...[
+            const SizedBox(height: 10),
+            bilingualButton(issueFromStockLabel, () => onIssueFromStock!(entry), key: Key('issue-stock-${p.id}')),
           ],
           if (kind != _Kind.others) ...[
             const SizedBox(height: 10),
@@ -245,7 +263,7 @@ class _Pill extends StatelessWidget {
 }
 
 class _Number extends StatelessWidget {
-  const _Number({required this.label, required this.value, this.strong = false});
+  const _Number({super.key, required this.label, required this.value, this.strong = false});
   final Bilingual label;
   final String value;
   final bool strong;
