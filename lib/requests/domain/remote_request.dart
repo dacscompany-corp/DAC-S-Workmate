@@ -14,6 +14,7 @@ class Portion {
     required this.cutoffAt,
     required this.purchaseOn,
     required this.deliveryOn,
+    this.fromStock = 0,
   });
 
   factory Portion.fromJson(Map<String, dynamic> j) => Portion(
@@ -23,6 +24,7 @@ class Portion {
         cutoffAt: DateTime.parse(j['cutoff_at'] as String),
         purchaseOn: j['purchase_on'] as String,
         deliveryOn: j['delivery_on'] as String,
+        fromStock: _num(j['from_stock']),
       );
 
   final double quantity;
@@ -37,6 +39,9 @@ class Portion {
   /// Calendar dates ("2026-10-12"), never instants.
   final String purchaseOn;
   final String deliveryOn;
+
+  /// 2B-b (0106): what the office issued from stock for this portion (0 before 0106).
+  final double fromStock;
 }
 
 class RemoteLine {
@@ -59,6 +64,7 @@ class RemoteLine {
     this.cancelled = false,
     this.hasConflict = false,
     this.portions = const [],
+    this.fromStock = 0,
   });
 
   factory RemoteLine.fromJson(Map<String, dynamic> j) => RemoteLine(
@@ -79,6 +85,7 @@ class RemoteLine {
         version: (j['version'] as num).toInt(),
         hasConflict: j['has_conflict'] == true,
         needed: _num(j['needed']),
+        fromStock: _num(j['from_stock']),
         portions: [
           for (final p in (j['portions'] as List<dynamic>? ?? const [])) Portion.fromJson(Map<String, dynamic>.from(p as Map)),
         ],
@@ -107,6 +114,10 @@ class RemoteLine {
   /// Still needed: Σ(quantity − pending reduction).
   final double needed;
   final List<Portion> portions;
+
+  /// 2B-b (Q26, 0106): what the office issued from stock for this line —
+  /// the only thing of stock a worker sees. 0 before 0106 or with stock off.
+  final double fromStock;
 }
 
 class RemotePhoto {

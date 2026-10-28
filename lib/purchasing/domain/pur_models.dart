@@ -131,6 +131,10 @@ class ShoppingLine {
     this.stillToBuy = 0,
     this.unitChecks = 0,
     this.portions = const [],
+    this.catalogItemId,
+    this.fromStock = 0,
+    this.inWarehouse = 0,
+    this.inWarehouseUnit = '',
   });
 
   factory ShoppingLine.fromJson(Map<String, dynamic> j) => ShoppingLine(
@@ -154,6 +158,10 @@ class ShoppingLine {
         stillToBuy: _num(j['still_to_buy']),
         unitChecks: _num(j['unit_checks']).toInt(),
         portions: _rows(j['portions']).map(PurPortion.fromJson).toList(),
+        catalogItemId: j['catalog_item_id'] as String?,
+        fromStock: _num(j['from_stock']),
+        inWarehouse: _num(j['in_warehouse']),
+        inWarehouseUnit: _str(j['in_warehouse_unit']),
       );
 
   final String lineId;
@@ -180,6 +188,18 @@ class ShoppingLine {
   final int unitChecks;
   final List<PurPortion> portions;
 
+  /// The request line's catalogue item (an issue from stock needs it).
+  final String? catalogItemId;
+
+  /// 2B-b (0104): what the office issued from stock for this line — Bought
+  /// stays purchases alone, and Still to buy counts both.
+  final double fromStock;
+
+  /// Usable warehouse stock of the line's catalogue item, in [inWarehouseUnit]:
+  /// a hint, no reservation (Q9) — 0 while stock is off.
+  final double inWarehouse;
+  final String inWarehouseUnit;
+
   Map<String, dynamic> toJson() => {
         'line_id': lineId,
         'request_id': requestId,
@@ -201,6 +221,10 @@ class ShoppingLine {
         'still_to_buy': stillToBuy,
         'unit_checks': unitChecks,
         'portions': [for (final p in portions) p.toJson()],
+        'catalog_item_id': catalogItemId,
+        'from_stock': fromStock,
+        'in_warehouse': inWarehouse,
+        'in_warehouse_unit': inWarehouseUnit,
       };
 
   /// "Santos Townhouse · AW-03 Fence"; the main contract shows the project alone.
