@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
@@ -12,11 +14,18 @@ import '../attendance/home/home_screen.dart';
 import '../attendance/ui/attendance_copy.dart';
 import '../auth/worker_profile.dart';
 import '../profile/account_services.dart';
+import '../profile/password_prompt.dart';
 import '../profile/profile_screen.dart';
+import '../profile/set_own_password_screen.dart';
 import '../requests/home/request_updates_card.dart';
 import '../requests/list/requests_controller.dart';
 import '../requests/list/requests_screen.dart';
 import '../requests/requests_services.dart';
+import '../tools/data/tool_submitter.dart';
+import '../tools/tools_services.dart';
+import '../tools/ui/tools_card.dart';
+import '../tools/ui/tools_controller.dart';
+import '../tools/ui/tools_screen.dart';
 import '../widget/start_flow.dart';
 import '../workplan/ui/my_work_card.dart';
 import '../workplan/ui/my_work_controller.dart';
@@ -28,7 +37,8 @@ enum _Tab { home, work, requests, history, profile }
 /// The signed-in app: Home, My Work (Stage 1c), Requests (Stage 1a), History
 /// and Profile, and the
 /// four-step Time In / Time Out flow launched from Home. The flow is MODAL (no
-/// tabs while recording).
+/// tabs while recording). Tools (Stage 3b) open from a card on Home; the
+/// temporary-password prompt opens over Home, never over the flow.
 class HomeShell extends StatefulWidget {
   const HomeShell({
     super.key,
@@ -40,6 +50,7 @@ class HomeShell extends StatefulWidget {
     this.startRequests,
     this.requests,
     this.workPlan,
+    this.tools,
   });
 
   final WorkerProfile worker;
@@ -57,6 +68,9 @@ class HomeShell extends StatefulWidget {
   /// The My Work tab's services; null shows no My Work tab.
   final WorkPlanServices? workPlan;
 
+  /// Tools on the phone (Stage 3b); null shows no My tools card.
+  final ToolsServices? tools;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -69,6 +83,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   late final HistoryController _history;
   RequestsController? _requests;
   MyWorkController? _work;
+  ToolsController? _tools;
+  ToolSubmitter? _toolSubmitter;
+  PasswordPrompt? _prompt;
+  Route<void>? _promptRoute;
+  NavigatorState? _promptNavigator;
 
   List<_Tab> get _tabs => [
         _Tab.home,
@@ -88,6 +107,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (r != null) _requests = RequestsController(api: r.api)..refresh();
     final w = widget.workPlan;
     if (w != null) _work = MyWorkController(api: w.api)..refresh();
+    final t = widget.tools;
+    if (t != null) {
+      _tools = ToolsController(remote: t.remote, saved: t.saved, userId: widget.worker.id, isLeader: widget.worker.role == 'teamLeader')
+        ..refresh();
+      final submitter = _toolSubmitter = ToolSubmitter(remote: t.remote, store: t.store);
+      unawaited(submitter.load(widget.worker.id).then((_) => submitter.checkAll()));
+    }
+    final p = widget.account.passwordPrompt;
+    if (p != null) {
+      // Bound to this worker: the prompt changes no other account's password.
+      _prompt = PasswordPrompt(services: p, userId: widget.worker.id)
+        ..addListener(_maybePrompt)
+        ..check();
+    }
     WidgetsBinding.instance.addObserver(this);
     _home.refresh();
     // main.dart passes the same QueueSettled to all of them: listen once each.
@@ -144,6 +177,30 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (_tab == _Tab.history) _history.refresh();
     _requests?.refresh();
     _work?.refresh();
+    _tools?.refresh();
+    // Something just reached the server: signal is back, so ask again.
+    _prompt?.check();
+  }
+
+  /// The temporary-password prompt (P1 = A), when the server wants it — over
+  /// Home only. A Time In or Time Out in progress is never interrupted: the
+  /// prompt waits for the flow to end (_endFlow asks again).
+  void _maybePrompt() {
+    final p = _prompt;
+    if (p == null || !mounted || _promptRoute != null || _flow != null || !p.wanted) return;
+    final route = MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => SetOwnPasswordScreen(prompt: p, onSignOut: widget.onSignOut),
+    );
+    final navigator = Navigator.of(context);
+    _promptRoute = route;
+    _promptNavigator = navigator;
+    navigator.push(route).whenComplete(() {
+      if (_promptRoute == route) {
+        _promptRoute = null;
+        _promptNavigator = null;
+      }
+    });
   }
 
   @override
@@ -160,6 +217,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _history.dispose();
     _requests?.dispose();
     _work?.dispose();
+    _tools?.dispose();
+    _toolSubmitter?.dispose();
+    _prompt?.removeListener(_maybePrompt);
+    _prompt?.dispose();
+    // Signed out (or another account let in) while the prompt was open: it
+    // must not stay over the next screen.
+    final route = _promptRoute;
+    final navigator = _promptNavigator;
+    if (route != null && navigator != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (route.isActive) navigator.removeRoute(route);
+      });
+    }
     super.dispose();
   }
 
@@ -172,6 +242,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _home.refresh();
       _requests?.refresh();
       _work?.refresh();
+      _tools?.refresh();
+      final s = _toolSubmitter;
+      if (s != null && s.blocked) unawaited(s.checkAll());
+      _prompt?.check();
     }
   }
 
@@ -191,7 +265,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _exitNotice = notice;
     });
     // After this frame: the flow screen listens to it until it is gone.
-    WidgetsBinding.instance.addPostFrameCallback((_) => ended?.dispose());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ended?.dispose();
+      // A prompt that waited for the flow may open now.
+      _maybePrompt();
+    });
     _home.refresh();
   }
 
@@ -217,6 +295,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _selectTab(_Tab.requests);
   }
 
+  void _openTools() {
+    final c = _tools;
+    final s = _toolSubmitter;
+    if (c == null || s == null) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ToolsScreen(controller: c, submitter: s)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.services;
@@ -233,6 +318,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     final requests = _requests;
     final work = _work;
+    final tools = _tools;
     final cards = [
       if (work != null)
         ListenableBuilder(
@@ -243,6 +329,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ListenableBuilder(
           listenable: requests,
           builder: (context, _) => RequestUpdatesCard(updates: requests.updates, onOpen: () => _selectTab(_Tab.requests)),
+        ),
+      if (tools != null)
+        ListenableBuilder(
+          listenable: tools,
+          builder: (context, _) => ToolsCard(controller: tools, onOpen: _openTools),
         ),
     ];
     final body = switch (_tab) {

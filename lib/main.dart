@@ -37,6 +37,7 @@ import 'net/supabase_setup.dart';
 import 'net/update_nudges.dart';
 import 'net/workmate_http_client.dart';
 import 'profile/account_services.dart';
+import 'profile/password_prompt.dart';
 import 'purchasing/buyer_access.dart';
 import 'purchasing/data/purchasing_account_wipe.dart';
 import 'purchasing/data/purchasing_db.dart';
@@ -50,6 +51,11 @@ import 'requests/requests_services.dart';
 import 'stock/data/stock_pending_store.dart';
 import 'stock/data/stock_remote.dart';
 import 'terms/terms_repository.dart';
+import 'tools/data/tool_pending_store.dart';
+import 'tools/data/tools_account_wipe.dart';
+import 'tools/data/tools_remote.dart';
+import 'tools/data/tools_saved_copy.dart';
+import 'tools/tools_services.dart';
 import 'update/apk_installer.dart';
 import 'update/app_update_repository.dart';
 import 'widget/start_flow.dart';
@@ -159,6 +165,8 @@ Future<void> main() async {
       Ready(:final worker) => terms.acceptedAt(worker.id),
       _ => null,
     },
+    // 3b: a worker given a temporary password sets their own (P1 = A).
+    passwordPrompt: PasswordPromptServices.supabase(client, prefs),
   );
 
   final photos = AttendancePhotos.supabase(client);
@@ -286,6 +294,14 @@ Future<void> main() async {
     debugPrint('Buying unavailable: $e');
   }
 
+  // Tools (Stage 3b): online reads, writes saved before they are sent (Q22).
+  // The saved copy is kept for the signed-in worker only, as My Work's.
+  final toolsSaved = ToolsSavedCopy(prefs);
+  final toolsWipe = ToolsAccountWipe(toolsSaved);
+  controller.addListener(() => toolsWipe.onAppState(controller.state));
+  toolsWipe.onAppState(controller.state);
+  final tools = ToolsServices(remote: SupabaseToolsRemote(client), store: PrefsToolPendingStore(prefs), saved: toolsSaved);
+
   runApp(WorkMateApp(
     controller: controller,
     updates: updates,
@@ -298,5 +314,6 @@ Future<void> main() async {
     requests: requests,
     workPlan: workPlan,
     purchasing: purchasing,
+    tools: tools,
   ));
 }

@@ -8,6 +8,7 @@ import 'purchasing/purchasing_services.dart';
 import 'purchasing/ui/buyer_shell.dart';
 import 'purchasing/ui/buying_off_screen.dart';
 import 'requests/requests_services.dart';
+import 'tools/tools_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
 import 'ui/login_screen.dart';
@@ -33,6 +34,7 @@ class WorkMateApp extends StatefulWidget {
     this.requests,
     this.workPlan,
     this.purchasing,
+    this.tools,
   });
 
   final AppController controller;
@@ -60,6 +62,9 @@ class WorkMateApp extends StatefulWidget {
 
   /// A buyer's screens (Stage 2A-3b); null in tests that do not need them.
   final PurchasingServices? purchasing;
+
+  /// Tools on the phone (Stage 3b); null shows no My tools card.
+  final ToolsServices? tools;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -141,6 +146,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   startRequests: _inbox,
                   requests: widget.requests,
                   workPlan: widget.workPlan,
+                  tools: widget.tools,
                 ),
               BuyerReady(:final worker) => BuyerShell(
                   buyer: worker,
