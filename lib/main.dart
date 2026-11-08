@@ -9,6 +9,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
+import 'agreements/agreements_services.dart';
+import 'agreements/data/agreements_remote.dart';
 import 'app.dart';
 import 'app_controller.dart';
 import 'attendance/attendance_services.dart';
@@ -302,6 +304,10 @@ Future<void> main() async {
   toolsWipe.onAppState(controller.state);
   final tools = ToolsServices(remote: SupabaseToolsRemote(client), store: PrefsToolPendingStore(prefs), saved: toolsSaved);
 
+  // Linked Labor (0113): the worker's own agreements. Online only — nothing
+  // about money is saved on the phone (Q2).
+  final agreements = AgreementsServices(remote: SupabaseAgreementsRemote(client));
+
   runApp(WorkMateApp(
     controller: controller,
     updates: updates,
@@ -315,5 +321,6 @@ Future<void> main() async {
     workPlan: workPlan,
     purchasing: purchasing,
     tools: tools,
+    agreements: agreements,
   ));
 }

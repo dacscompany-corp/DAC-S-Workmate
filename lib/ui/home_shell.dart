@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../agreements/agreements_services.dart';
+import '../agreements/ui/agreements_card.dart';
+import '../agreements/ui/agreements_controller.dart';
+import '../agreements/ui/agreements_screen.dart';
 import '../app_controller.dart';
 import '../attendance/attendance_services.dart';
 import '../attendance/domain/work_date.dart';
@@ -51,6 +55,7 @@ class HomeShell extends StatefulWidget {
     this.requests,
     this.workPlan,
     this.tools,
+    this.agreements,
   });
 
   final WorkerProfile worker;
@@ -71,6 +76,9 @@ class HomeShell extends StatefulWidget {
   /// Tools on the phone (Stage 3b); null shows no My tools card.
   final ToolsServices? tools;
 
+  /// Linked Labor (0113); null shows no My agreements card.
+  final AgreementsServices? agreements;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
@@ -84,6 +92,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   RequestsController? _requests;
   MyWorkController? _work;
   ToolsController? _tools;
+  AgreementsController? _agreements;
   ToolSubmitter? _toolSubmitter;
   PasswordPrompt? _prompt;
   Route<void>? _promptRoute;
@@ -114,6 +123,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       final submitter = _toolSubmitter = ToolSubmitter(remote: t.remote, store: t.store);
       unawaited(submitter.load(widget.worker.id).then((_) => submitter.checkAll()));
     }
+    _agreements = _newAgreements();
     final p = widget.account.passwordPrompt;
     if (p != null) {
       // Bound to this worker: the prompt changes no other account's password.
@@ -171,6 +181,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ?widget.workPlan?.changed,
       };
 
+  // Linked Labor: bound to this worker, online only. Its amounts live in the
+  // controller's memory and go with it (sign-out, another account).
+  AgreementsController? _newAgreements() {
+    final a = widget.agreements;
+    if (a == null) return null;
+    return AgreementsController(remote: a.remote, userId: widget.worker.id)..refresh();
+  }
+
+  @override
+  void didUpdateWidget(HomeShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Another account on the same Home (not the usual sign-out route): never
+    // show the last account's agreements, even for a moment.
+    if (oldWidget.worker.id != widget.worker.id) {
+      _agreements?.dispose();
+      _agreements = _newAgreements();
+    }
+  }
+
   void _onQueueSettled() {
     // Not while recording: the flow owns the screen, and _endFlow refreshes anyway.
     if (_flow == null) _home.refresh(sendQueued: false);
@@ -219,6 +248,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _work?.dispose();
     _tools?.dispose();
     _toolSubmitter?.dispose();
+    _agreements?.dispose();
     _prompt?.removeListener(_maybePrompt);
     _prompt?.dispose();
     // Signed out (or another account let in) while the prompt was open: it
@@ -243,6 +273,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _requests?.refresh();
       _work?.refresh();
       _tools?.refresh();
+      _agreements?.refresh();
       final s = _toolSubmitter;
       if (s != null && s.blocked) unawaited(s.checkAll());
       _prompt?.check();
@@ -295,6 +326,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _selectTab(_Tab.requests);
   }
 
+  void _openAgreements() {
+    final c = _agreements;
+    if (c == null) return;
+    c.refresh();
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AgreementsScreen(controller: c)));
+  }
+
   void _openTools() {
     final c = _tools;
     final s = _toolSubmitter;
@@ -319,6 +357,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final requests = _requests;
     final work = _work;
     final tools = _tools;
+    final agreements = _agreements;
     final cards = [
       if (work != null)
         ListenableBuilder(
@@ -334,6 +373,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ListenableBuilder(
           listenable: tools,
           builder: (context, _) => ToolsCard(controller: tools, onOpen: _openTools),
+        ),
+      if (agreements != null)
+        ListenableBuilder(
+          listenable: agreements,
+          builder: (context, _) => AgreementsCard(controller: agreements, onOpen: _openAgreements),
         ),
     ];
     final body = switch (_tab) {

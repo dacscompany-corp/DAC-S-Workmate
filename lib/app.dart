@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'agreements/agreements_services.dart';
 import 'app_controller.dart';
 import 'attendance/attendance_services.dart';
 import 'profile/account_services.dart';
@@ -35,6 +36,7 @@ class WorkMateApp extends StatefulWidget {
     this.workPlan,
     this.purchasing,
     this.tools,
+    this.agreements,
   });
 
   final AppController controller;
@@ -65,6 +67,9 @@ class WorkMateApp extends StatefulWidget {
 
   /// Tools on the phone (Stage 3b); null shows no My tools card.
   final ToolsServices? tools;
+
+  /// Linked Labor (0113); null shows no My agreements card.
+  final AgreementsServices? agreements;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -147,6 +152,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   requests: widget.requests,
                   workPlan: widget.workPlan,
                   tools: widget.tools,
+                  agreements: widget.agreements,
                 ),
               BuyerReady(:final worker) => BuyerShell(
                   buyer: worker,
