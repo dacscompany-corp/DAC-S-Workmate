@@ -107,6 +107,29 @@ void main() {
     expect(find.text('No payments recorded yet.'), findsOneWidget);
   });
 
+  testWidgets('a payment date saved with its time (or with none) still reads as its day', (tester) async {
+    // Project Control saves a payment's date with the time, "2026-11-09T13:07"
+    // (Manila wall-clock): 241 of 243 real contract payments on 10 Nov 2026.
+    // The pilot's detail showed that raw text. A late-evening time keeps its own
+    // day, and an empty date reads as a dash.
+    remote.answers.add([
+      MyAgreement.fromJson(Map<String, dynamic>.from(jsonDecode('''
+        {"id": "a-time", "project": "Alpha House", "main_project": null, "project_completed": false, "progress_pct": null,
+         "scope": "Glass", "trade": "", "pay_basis": "fixed", "works": [], "agreed": 1000, "paid": 300, "balance": 700,
+         "ended": false, "ended_at": null,
+         "payments": [{"date": "2026-11-09T13:07", "amount": 100, "method": "gcash"},
+                      {"date": "2026-11-08T23:45", "amount": 100, "method": "cash"},
+                      {"date": "", "amount": 100, "method": "gcash"}]}''') as Map)),
+    ]);
+    await c.refresh();
+    await show(tester, AgreementDetailScreen(controller: c, agreementId: 'a-time'));
+    expect(find.text('9 Nov 2026 · GCash'), findsOneWidget);
+    expect(find.text('8 Nov 2026 · Cash'), findsOneWidget);
+    expect(find.text('— · GCash'), findsOneWidget);
+    expect(find.textContaining('T13:07'), findsNothing);
+    expect(find.textContaining('T23:45'), findsNothing);
+  });
+
   testWidgets('no signal on refresh: every amount leaves the screen, and it says it needs signal', (tester) async {
     remote.answers.add(all());
     await c.refresh();

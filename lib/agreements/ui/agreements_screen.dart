@@ -215,13 +215,19 @@ class _PaymentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final d = p.date == null ? null : DateTime.tryParse('${p.date}T00:00:00+08:00');
+    // Project Control saves the date with its time ("2026-11-09T13:07", Manila
+    // wall-clock); older rows hold the day alone, a few nothing. The day is the
+    // first ten characters either way. The time is never parsed: read as UTC it
+    // would move a late-evening payment to the next day.
+    final raw = (p.date ?? '').trim();
+    final day = RegExp(r'^\d{4}-\d{2}-\d{2}').firstMatch(raw)?.group(0);
+    final d = day == null ? null : DateTime.tryParse('${day}T00:00:00+08:00');
     final method = paymentMethodLabel(p.method);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
         Expanded(
-          child: Text([d == null ? (p.date ?? '—') : shortDate(d), if (method.isNotEmpty) method].join(' · '),
+          child: Text([d == null ? (raw.isEmpty ? '—' : raw) : shortDate(d), if (method.isNotEmpty) method].join(' · '),
               style: const TextStyle(color: WmColors.textSecondary)),
         ),
         Text(agreementPeso(p.amount), style: const TextStyle(fontWeight: FontWeight.w700)),
