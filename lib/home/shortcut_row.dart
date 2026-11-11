@@ -14,8 +14,9 @@ class ShortcutTile {
   final VoidCallback onTap;
 }
 
-/// Four equal columns. A null tile leaves its column empty so no tile ever
-/// moves; no tile at all shows nothing.
+/// The shortcuts that are shown sit side by side, in order, and share the row
+/// equally; a null tile (its feature is off) leaves no gap (owner decision
+/// after the 11 Nov 2026 pilot). No tile at all shows nothing.
 class ShortcutRow extends StatelessWidget {
   const ShortcutRow({super.key, required this.tiles});
 
@@ -23,18 +24,14 @@ class ShortcutRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tiles.every((t) => t == null)) return const SizedBox.shrink();
+    final shown = [for (final t in tiles) ?t];
+    if (shown.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 20),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        for (var i = 0; i < tiles.length; i++) ...[
+        for (var i = 0; i < shown.length; i++) ...[
           if (i > 0) const SizedBox(width: 4),
-          Expanded(
-            child: switch (tiles[i]) {
-              final t? => _Tile(tile: t),
-              null => const SizedBox.shrink(),
-            },
-          ),
+          Expanded(child: _Tile(tile: shown[i])),
         ],
       ]),
     );

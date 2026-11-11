@@ -82,18 +82,25 @@ void main() {
     expect(find.text('Next delivery Wed 14 Oct'), findsOneWidget);
   });
 
-  testWidgets('shortcuts: an empty column stays empty, a tap opens, no tile at all shows nothing', (tester) async {
+  testWidgets('shortcuts: the ones shown sit side by side and share the row, a tap opens, no tile at all shows nothing',
+      (tester) async {
     useTallPhone(tester);
     var taps = 0;
     await tester.pumpWidget(wrap(ShortcutRow(tiles: [
-      null,
+      ShortcutTile(id: 'tools', icon: Icons.handyman_outlined, label: 'My tools', onTap: () {}),
+      null, // no agreements: no empty spot is kept for it (owner decision after the 11 Nov pilot)
       ShortcutTile(id: 'notes', icon: Icons.forum_outlined, label: 'Meeting notes', onTap: () => taps++),
-      null,
-      null,
+      ShortcutTile(id: 'new-request', icon: Icons.add, label: 'New request', onTap: () {}),
     ])));
     final row = tester.getRect(find.byType(ShortcutRow));
-    expect(tester.getCenter(find.byKey(const Key('shortcut-notes'))).dx, greaterThan(row.left + row.width / 4),
-        reason: 'it stays in the second column');
+    final tools = tester.getRect(find.byKey(const Key('shortcut-tools')));
+    final notes = tester.getRect(find.byKey(const Key('shortcut-notes')));
+    final request = tester.getRect(find.byKey(const Key('shortcut-new-request')));
+    expect(notes.left - tools.right, moreOrLessEquals(4), reason: 'no gap where My agreements would be');
+    expect(request.left - notes.right, moreOrLessEquals(4));
+    expect([tools.width, notes.width, request.width], everyElement(moreOrLessEquals((row.width - 8) / 3)),
+        reason: 'three shortcuts share the row equally');
+    expect([tools.left, request.right], [moreOrLessEquals(row.left), moreOrLessEquals(row.right)]);
     await tester.tap(find.byKey(const Key('shortcut-notes')));
     expect(taps, 1);
     await tester.pumpWidget(wrap(const ShortcutRow(tiles: [null, null, null, null])));

@@ -386,7 +386,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  /// Home's four shortcut columns (spec §4.7); null leaves a column empty.
+  /// Home's shortcuts, in order (spec §4.7); null = that feature is off, and
+  /// the others close up.
   List<ShortcutTile?> _shortcuts() {
     final work = _work;
     final requests = _requests;
