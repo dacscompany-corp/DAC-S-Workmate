@@ -38,7 +38,11 @@ class _ToolsScreenState extends State<ToolsScreen> {
   @override
   void initState() {
     super.initState();
-    if (_s.blocked) _s.checkAll();
+    // After this frame: Home's inbox and badge listen to the submitter, and
+    // checkAll notifies before its first await.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _s.blocked) _s.checkAll();
+    });
   }
 
   Future<void> _after(Future<bool?> recorded) async {

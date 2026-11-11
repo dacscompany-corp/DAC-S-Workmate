@@ -7,9 +7,9 @@ import '../../ui/theme.dart';
 import '../domain/wp_rules.dart';
 import '../workplan_services.dart';
 import 'my_work_controller.dart';
-import 'notes_screen.dart';
+import 'notes_sheet.dart';
 import 'proposals_screen.dart';
-import 'task_screen.dart';
+import 'task_openers.dart';
 import 'workplan_copy.dart';
 import 'workplan_widgets.dart';
 
@@ -35,12 +35,8 @@ class MyWorkScreen extends StatelessWidget {
   /// Opens Requests (a materials problem's shortcut); null hides it.
   final VoidCallback? onMakeRequest;
 
-  Future<void> _open(BuildContext context, String taskId) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => TaskScreen(controller: controller, services: services, taskId: taskId, onMakeRequest: onMakeRequest),
-    ));
-    await controller.refresh();
-  }
+  Future<void> _open(BuildContext context, String taskId) =>
+      openTask(context, controller, services, taskId, onMakeRequest: onMakeRequest);
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -64,7 +60,7 @@ class MyWorkScreen extends StatelessWidget {
               Wrap(spacing: 8, runSpacing: 8, children: [
                 OutlinedButton.icon(
                   key: const Key('open-notes'),
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => NotesScreen(controller: c))),
+                  onPressed: () => showNotesSheet(context, c),
                   icon: const Icon(Icons.forum_outlined),
                   label: Text('Meeting notes (${view.notes.length})'),
                 ),

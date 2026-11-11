@@ -324,44 +324,49 @@ void main() {
     });
   });
 
-  group('the My tools card', () {
+  group('My tools on Home and on Profile', () {
     ToolsServices tools(FakeToolsRemote remote) =>
         ToolsServices(remote: remote, store: MemoryToolPendingStore(), saved: ToolsSavedCopy(prefs));
 
-    testWidgets('a worker: the card counts their tools and reported problems, and opens Tools', (tester) async {
+    testWidgets('a worker: Profile counts their tools and reported problems; the shortcut opens Tools', (tester) async {
       final remote = FakeToolsRemote();
       await showShell(tester, tools: tools(remote));
-      expect(find.byKey(const Key('tools-card')), findsOneWidget);
-      expect(find.text('2 tools with you'), findsOneWidget);
-      expect(find.text('1 problem reported'), findsOneWidget);
+      expect(find.byKey(const Key('shortcut-tools')), findsOneWidget);
       expect(remote.teamCalls, 0, reason: 'a worker is never asked for a team');
-      await tester.tap(find.byKey(const Key('tools-card')));
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 tools with you · 1 problem reported'), findsOneWidget);
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('shortcut-tools')));
       await tester.pumpAndSettle();
       expect(find.text('Tools'), findsOneWidget);
       expect(find.text('TOOL-0001 · Grinder'), findsOneWidget);
       expect(find.byKey(const Key('tools-parts')), findsNothing, reason: 'no Team for a worker');
     });
 
-    testWidgets('a team leader: the card shows the team, and Tools has Mine, Team and My records', (tester) async {
+    testWidgets('a team leader: the shortcut opens Tools with Mine, Team and My records', (tester) async {
       server.session = leader.id;
       await showShell(tester, who: leader, tools: tools(FakeToolsRemote()));
-      expect(find.text('Team: 4 tools'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('tools-card')));
+      await tester.tap(find.byKey(const Key('shortcut-tools')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('tools-parts')), findsOneWidget);
     });
 
-    testWidgets('tools switched off: no card, and Home is as before', (tester) async {
+    testWidgets('tools switched off: no shortcut, no Profile row, and Home is as before', (tester) async {
       final remote = FakeToolsRemote()..failMine = refusal('TOOLS_OFF');
       await showShell(tester, tools: tools(remote));
-      expect(find.byKey(const Key('tools-card')), findsNothing);
+      expect(find.byKey(const Key('shortcut-tools')), findsNothing);
       await timeInWorks(tester);
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('profile-tools')), findsNothing);
     });
 
-    testWidgets('no signal on the first open, nothing saved: no card, attendance as always', (tester) async {
+    testWidgets('no signal on the first open, nothing saved: no shortcut, attendance as always', (tester) async {
       final remote = FakeToolsRemote()..failReads = refusal('no signal');
       await showShell(tester, tools: tools(remote));
-      expect(find.byKey(const Key('tools-card')), findsNothing);
+      expect(find.byKey(const Key('shortcut-tools')), findsNothing);
       await timeInWorks(tester);
     });
   });

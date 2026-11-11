@@ -32,10 +32,23 @@ class FakeAttendance implements AttendanceApi {
   List<AttendanceRecord> historyRecords = [];
   Object? historyError;
   Completer<void>? historyGate;
+
+  /// Holds today() open, as a slow read over a weak signal does.
+  Completer<void>? todayGate;
   final historyCalls = <(String, String)>[];
 
   List<PendingSubmission> refused = [];
   final dismissed = <String>[];
+
+  /// What [waitingCount] answers; [waitingError] is thrown instead while set.
+  int waiting = 0;
+  Object? waitingError;
+
+  @override
+  Future<int> waitingCount() async {
+    if (waitingError != null) throw waitingError!;
+    return waiting;
+  }
 
   @override
   Future<List<AttendanceProject>> activeProjects() async {
@@ -74,6 +87,8 @@ class FakeAttendance implements AttendanceApi {
 
   @override
   Future<AttendanceRecord?> today() async {
+    final gate = todayGate;
+    if (gate != null) await gate.future;
     if (todayError != null) throw todayError!;
     return todayRecord;
   }

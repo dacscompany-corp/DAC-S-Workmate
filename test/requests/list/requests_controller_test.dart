@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:workmate/requests/data/requests_api.dart';
 import 'package:workmate/requests/domain/remote_request.dart';
@@ -9,9 +8,7 @@ import 'package:workmate/requests/domain/request_draft.dart';
 import 'package:workmate/requests/domain/request_failure.dart';
 import 'package:workmate/requests/domain/request_status.dart';
 import 'package:workmate/requests/home/request_updates.dart';
-import 'package:workmate/requests/home/request_updates_card.dart';
 import 'package:workmate/requests/list/requests_controller.dart';
-import 'package:workmate/ui/theme.dart';
 
 import '../domain/request_models_test.dart' show requestDoc;
 import '../request_fakes.dart';
@@ -87,26 +84,5 @@ void main() {
     expect(u.isEmpty, isFalse);
     expect(u.nextDelivery, '2026-10-14');
     expect(summarizeRequests(const [], now).isEmpty, isTrue);
-  });
-
-  testWidgets('Home\'s card says what needs the worker and opens Requests', (tester) async {
-    var opened = 0;
-    await tester.pumpWidget(MaterialApp(
-      theme: workMateTheme(),
-      home: Scaffold(
-        body: RequestUpdatesCard(
-          updates: const RequestUpdates(needsAction: 1, pending: 2, drafts: 1, nextDelivery: '2026-10-14'),
-          onOpen: () => opened++,
-        ),
-      ),
-    ));
-    expect(find.text('1 needs your attention'), findsOneWidget);
-    expect(find.text('2 waiting for signal'), findsOneWidget);
-    expect(find.text('1 draft not sent'), findsOneWidget);
-    expect(find.text('Next delivery Wed 14 Oct'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('request-updates')));
-    expect(opened, 1);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: RequestUpdatesCard(updates: const RequestUpdates(), onOpen: () {}))));
-    expect(find.byKey(const Key('request-updates')), findsNothing);
   });
 }

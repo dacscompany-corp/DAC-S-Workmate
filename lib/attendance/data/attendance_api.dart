@@ -20,6 +20,10 @@ abstract interface class AttendanceApi {
   /// This worker's submissions the server refused for good, oldest first.
   Future<List<PendingSubmission>> refusedSubmissions();
 
+  /// How many of this worker's Time In / Time Out are still on the phone,
+  /// waiting to be sent (refused ones are not waiting). Never asks the server.
+  Future<int> waitingCount();
+
   /// Forgets one refused submission (the worker has read why) and deletes its photo.
   Future<void> dismissRefused(String eventId);
 }

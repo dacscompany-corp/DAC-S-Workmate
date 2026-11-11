@@ -166,6 +166,13 @@ class AttendanceRepository implements AttendanceApi {
   }
 
   @override
+  Future<int> waitingCount() async {
+    final workerId = currentWorkerId();
+    if (workerId.isEmpty) return 0;
+    return (await db.sendable(workerId)).length;
+  }
+
+  @override
   Future<void> dismissRefused(String eventId) async {
     final row = await db.pendingById(eventId);
     // Only this worker's own, and only a refused row: a sendable one is still owed to the server.

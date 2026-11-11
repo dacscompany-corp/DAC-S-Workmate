@@ -44,11 +44,17 @@ class HomeController extends ChangeNotifier {
   bool _rewardUnavailable = false;
   double? _rewardAmount;
   bool _disposed = false;
+  int? _waiting;
 
   bool get loading => _loading;
   AttendanceRecord? get record => _record;
   AttendanceFailure? get failure => _failure;
   List<PendingSubmission> get refused => _refused;
+
+  /// This worker's Time In / Time Out still on the phone; null until the
+  /// phone has been read, or when it could not be (Home's badge then shows
+  /// nothing rather than a guess).
+  int? get waiting => _waiting;
 
   /// Monday to FRIDAY: five cells, where [week] has six (DACs works Saturdays,
   /// the reward only asks about Mon-Fri). Empty until the server answered.
@@ -128,6 +134,7 @@ class HomeController extends ChangeNotifier {
     // Read separately so a failure here cannot take the hero button down.
     unawaited(_loadWeek());
     unawaited(_loadRefused());
+    unawaited(_loadWaiting());
     unawaited(_loadReward());
     try {
       _record = await _attendance.today();
@@ -170,6 +177,15 @@ class HomeController extends ChangeNotifier {
     } catch (_) {
       // Shown next time.
     }
+  }
+
+  Future<void> _loadWaiting() async {
+    try {
+      _waiting = await _attendance.waitingCount();
+    } catch (_) {
+      _waiting = null;
+    }
+    _notify();
   }
 
   Future<void> _loadReward() async {

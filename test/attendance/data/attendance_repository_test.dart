@@ -152,6 +152,20 @@ void main() {
     expect((await db.sendable('w1')).single.eventId, 'e1');
   });
 
+  test('waiting: this worker\'s rows still to send; a refused one is not waiting; nobody has none', () async {
+    expect(await repo.waitingCount(), 0);
+    await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
+    await repo.submit(await request(TimeDirection.timeOut, '2026-08-19T09:30:00Z', eventId: 'e2'));
+    expect(await repo.waitingCount(), 2);
+    await db.markFailed('e2', 'outsideRadius');
+    expect(await repo.waitingCount(), 1, reason: 'refused for good: shown as a notice, not waiting');
+    final anon = AttendanceRepository(
+      db: db, remote: remote, device: device, scheduler: scheduler,
+      currentWorkerId: () => '', photoDir: () async => tmp, now: () => now,
+    );
+    expect(await anon.waitingCount(), 0);
+  });
+
   test('a Time Out completes the mirror with optimistic minutes', () async {
     await repo.submit(await request(TimeDirection.timeIn, '2026-08-18T23:45:00Z'));
     final out = await repo.submit(await request(TimeDirection.timeOut, '2026-08-19T09:30:00Z', eventId: 'e2'));

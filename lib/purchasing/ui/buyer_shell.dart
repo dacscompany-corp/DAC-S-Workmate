@@ -9,6 +9,7 @@ import '../../stock/data/stock_submitter.dart';
 import '../../stock/ui/move_screen.dart';
 import '../../stock/ui/stock_controller.dart';
 import '../../stock/ui/stock_screen.dart';
+import '../../ui/wm_nav_bar.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
 import '../list/shopping_controller.dart';
@@ -242,16 +243,18 @@ class _BuyerShellState extends State<BuyerShell> with WidgetsBindingObserver {
                       label: const Text('Record purchase'),
                     ),
             ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: WmNavBar(
         selectedIndex: tabs.indexOf(_tab),
         onDestinationSelected: (i) => _select(tabs[i]),
         destinations: [
           for (final t in tabs)
             switch (t) {
-              _Tab.shopping => const NavigationDestination(icon: Icon(Icons.shopping_cart_outlined), label: 'Shopping list'),
-              _Tab.mine => NavigationDestination(icon: _MineIcon(controller: _mine!), label: 'My purchases'),
-              _Tab.stock => const NavigationDestination(key: Key('tab-stock'), icon: Icon(Icons.inventory_2_outlined), label: 'Stock'),
-              _Tab.profile => const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+              _Tab.shopping =>
+                NavigationDestination(icon: Icon(_tab == t ? Icons.shopping_cart : Icons.shopping_cart_outlined), label: 'Shopping list'),
+              _Tab.mine => NavigationDestination(icon: _MineIcon(controller: _mine!, selected: _tab == t), label: 'My purchases'),
+              _Tab.stock => NavigationDestination(
+                  key: const Key('tab-stock'), icon: Icon(_tab == t ? Icons.inventory_2 : Icons.inventory_2_outlined), label: 'Stock'),
+              _Tab.profile => NavigationDestination(icon: Icon(_tab == t ? Icons.person : Icons.person_outline), label: 'Profile'),
             },
         ],
       ),
@@ -285,20 +288,17 @@ class _SameItemsDialog extends StatelessWidget {
 
 /// My purchases, with a red number for purchases that need attention (Q7).
 class _MineIcon extends StatelessWidget {
-  const _MineIcon({required this.controller});
+  const _MineIcon({required this.controller, required this.selected});
   final MyPurchasesController controller;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: controller,
-        builder: (context, _) {
-          final n = controller.attention;
-          return Badge(
-            key: const Key('mine-badge'),
-            isLabelVisible: n > 0,
-            label: Text('$n'),
-            child: const Icon(Icons.receipt_long_outlined),
-          );
-        },
+        builder: (context, _) => RingBadge(
+          key: const Key('mine-badge'),
+          count: controller.attention,
+          child: Icon(selected ? Icons.receipt_long : Icons.receipt_long_outlined),
+        ),
       );
 }

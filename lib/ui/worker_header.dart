@@ -6,9 +6,12 @@ import 'theme.dart';
 /// Who is signed in: initials, name, position and worker ID ([subtitle]
 /// instead, for a buyer: an office account has no worker ID).
 class WorkerHeader extends StatelessWidget {
-  const WorkerHeader({super.key, required this.worker, this.subtitle});
+  const WorkerHeader({super.key, required this.worker, this.subtitle, this.trailing});
   final WorkerProfile worker;
   final String? subtitle;
+
+  /// At the right end of the row (Home's sync badge).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) => Row(children: [
@@ -24,5 +27,6 @@ class WorkerHeader extends StatelessWidget {
             Text(subtitle ?? worker.positionAndId, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
           ]),
         ),
+        if (trailing case final t?) ...[const SizedBox(width: 8), t],
       ]);
 }

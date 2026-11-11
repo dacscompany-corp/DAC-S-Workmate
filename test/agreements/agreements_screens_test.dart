@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:workmate/agreements/domain/my_agreement.dart';
-import 'package:workmate/agreements/ui/agreements_card.dart';
 import 'package:workmate/agreements/ui/agreements_controller.dart';
 import 'package:workmate/agreements/ui/agreements_screen.dart';
 import 'package:workmate/ui/theme.dart';
@@ -31,21 +30,6 @@ void main() {
     await tester.pumpWidget(wrap(w));
     await tester.pumpAndSettle();
   }
-
-  testWidgets('the Home card shows only after a read found agreements — and never an amount', (tester) async {
-    await show(tester, Scaffold(body: ListenableBuilder(listenable: c, builder: (_, _) => AgreementsCard(controller: c, onOpen: () {}))));
-    expect(find.byKey(const Key('agreements-card')), findsNothing);
-    remote.answers.add(all());
-    await c.refresh();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsOneWidget);
-    expect(find.text('4 agreements'), findsOneWidget);
-    expect(find.textContaining('₱'), findsNothing);
-    remote.answers.add(noSignal);
-    await c.refresh();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsNothing);
-  });
 
   testWidgets('fixed: Agreed, Paid so far, Balance; project progress, labelled as the project’s', (tester) async {
     remote.answers.add(all());

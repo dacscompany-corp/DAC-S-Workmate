@@ -9,6 +9,7 @@ import 'package:workmate/auth/worker_profile.dart';
 import 'package:workmate/profile/account_services.dart';
 import 'package:workmate/requests/data/requests_api.dart';
 import 'package:workmate/requests/domain/remote_request.dart';
+import 'package:workmate/requests/detail/request_detail_screen.dart';
 import 'package:workmate/requests/domain/request_status.dart';
 import 'package:workmate/requests/requests_services.dart';
 import 'package:workmate/terms/attendance_terms.dart';
@@ -17,6 +18,7 @@ import 'package:workmate/ui/login_screen.dart';
 import 'package:workmate/ui/terms_screen.dart';
 import 'package:workmate/ui/theme.dart';
 import 'package:workmate/widget/start_flow.dart';
+import 'package:workmate/workplan/ui/task_screen.dart';
 import 'package:workmate/workplan/workplan_services.dart';
 
 import '../attendance/fakes.dart';
@@ -177,7 +179,7 @@ void main() {
     expect(scheduler.sendNows, sendsBefore); // no send loop
   });
 
-  testWidgets('with Requests: a Requests tab, and the Home card opens it', (tester) async {
+  testWidgets('with Requests: a Requests tab with a red number, and the Fix row opens the request', (tester) async {
     useTallPhone(tester);
     final api = FakeRequestsApi()
       ..view = RequestsView(entries: [RequestEntry(state: SyncState.needsResolution, remote: RemoteRequest.fromJson(requestDoc()))]);
@@ -191,8 +193,14 @@ void main() {
     )));
     await tester.pumpAndSettle();
     expect(find.text('Requests'), findsWidgets);
-    expect(find.text('1 needs your attention'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('request-updates')));
+    expect(find.text('Request · Santos Townhouse · Main Contract'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('requests-badge')), matching: find.text('1')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('needs-fixRequest-r1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(RequestDetailScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Requests').last);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('new-request')), findsOneWidget);
     expect(find.text('Needs resolution'), findsOneWidget);
@@ -201,8 +209,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('My attendance'), findsOneWidget);
   });
-
-  testWidgets('with My Work: a My Work tab with a number, and the Home card opens it', (tester) async {
+  testWidgets('with My Work: a My Work tab with a number, and the Read row opens the task', (tester) async {
     useTallPhone(tester);
     final work = FakeWorkPlanApi()..view = viewWithUnread();
     await tester.pumpWidget(wrap(HomeShell(
@@ -216,9 +223,15 @@ void main() {
     )));
     await tester.pumpAndSettle();
     expect(find.text('My Work'), findsWidgets);
-    expect(find.text('1 task to read'), findsOneWidget);
+    expect(find.text('Wall prep'), findsOneWidget);
+    expect(find.text('New task · read it first'), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('my-work-badge')), matching: find.text('1')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('my-work-card')));
+    await tester.tap(find.byKey(const Key('needs-read-t1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(TaskScreen), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('My Work').last);
     await tester.pumpAndSettle();
     expect(find.text('TODAY · 1'), findsOneWidget);
     // Requests still has its own tab.

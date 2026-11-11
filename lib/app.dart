@@ -37,6 +37,8 @@ class WorkMateApp extends StatefulWidget {
     this.purchasing,
     this.tools,
     this.agreements,
+    this.requestsFailedToStart = false,
+    this.workPlanFailedToStart = false,
   });
 
   final AppController controller;
@@ -70,6 +72,11 @@ class WorkMateApp extends StatefulWidget {
 
   /// Linked Labor (0113); null shows no My agreements card.
   final AgreementsServices? agreements;
+
+  /// Requests' / My Work's phone storage failed to open at start (main.dart);
+  /// Home then never claims "All sent" or "all caught up".
+  final bool requestsFailedToStart;
+  final bool workPlanFailedToStart;
 
   @override
   State<WorkMateApp> createState() => _WorkMateAppState();
@@ -143,6 +150,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
               NeedsTerms() => TermsScreen(onAccept: c.acceptTerms),
               TermsUnavailable() => GateUnavailableScreen(onRetry: c.retryStartup, onSignOut: c.signOut),
               Ready(:final worker) => HomeShell(
+                  key: ValueKey(worker.id),
                   worker: worker,
                   versionName: widget.versionName,
                   onSignOut: c.signOut,
@@ -153,6 +161,8 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
                   workPlan: widget.workPlan,
                   tools: widget.tools,
                   agreements: widget.agreements,
+                  requestsFailedToStart: widget.requestsFailedToStart,
+                  workPlanFailedToStart: widget.workPlanFailedToStart,
                 ),
               BuyerReady(:final worker) => BuyerShell(
                   buyer: worker,

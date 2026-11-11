@@ -78,6 +78,7 @@ class ToolSubmitter extends ChangeNotifier {
   String? _userId;
   final _busy = <String>{};
   bool _disposed = false;
+  bool _loaded = false;
 
   /// The signed-in account's unresolved submissions, oldest first.
   List<ToolSubmission> get unresolved => [
@@ -100,6 +101,10 @@ class ToolSubmitter extends ChangeNotifier {
 
   /// No new tool submission until every one of these is settled.
   bool get blocked => unresolved.isNotEmpty || unreadable.isNotEmpty || recoveryNeeded;
+
+  /// The phone's saved tool records were read once for this account. Home's
+  /// badge and "Needs you" wait for it.
+  bool get loaded => _loaded;
   bool isBusy(String opId) => _busy.contains(opId);
   ToolSubmission? byOp(String opId) => unresolved.where((s) => s.opId == opId).firstOrNull;
 
@@ -107,6 +112,7 @@ class ToolSubmitter extends ChangeNotifier {
   Future<void> load(String userId) async {
     _userId = userId;
     await _reload();
+    _loaded = true;
     _notify();
   }
 

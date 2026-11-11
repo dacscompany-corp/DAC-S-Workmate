@@ -52,6 +52,34 @@ ThemeData workMateTheme() => ThemeData(
           textStyle: const TextStyle(fontFamily: 'Barlow', fontWeight: FontWeight.w800, fontSize: 16),
         ),
       ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        height: 68,
+        indicatorColor: WmColors.greenBorder,
+        indicatorShape: const StadiumBorder(),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final on = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontFamily: 'Barlow',
+            fontSize: 12,
+            fontWeight: on ? FontWeight.w800 : FontWeight.w600,
+            color: on ? WmColors.green : WmColors.textMuted,
+          );
+        }),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(size: 24, color: states.contains(WidgetState.selected) ? WmColors.green : WmColors.textMuted),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: WmColors.text,
+        contentTextStyle: const TextStyle(fontFamily: 'Barlow', color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        elevation: 6,
+      ),
     );
 
 const monoLabel = TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 1.2, color: WmColors.textMeta);

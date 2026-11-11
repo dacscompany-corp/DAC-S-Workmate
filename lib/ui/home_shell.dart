@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../agreements/agreements_services.dart';
-import '../agreements/ui/agreements_card.dart';
 import '../agreements/ui/agreements_controller.dart';
 import '../agreements/ui/agreements_screen.dart';
 import '../app_controller.dart';
@@ -17,31 +16,40 @@ import '../attendance/home/home_controller.dart';
 import '../attendance/home/home_screen.dart';
 import '../attendance/ui/attendance_copy.dart';
 import '../auth/worker_profile.dart';
+import '../home/needs_you.dart';
+import '../home/needs_you_card.dart';
+import '../home/shortcut_row.dart';
+import '../home/sync_badge.dart';
+import '../home/sync_summary.dart';
 import '../profile/account_services.dart';
 import '../profile/password_prompt.dart';
 import '../profile/profile_screen.dart';
 import '../profile/set_own_password_screen.dart';
-import '../requests/home/request_updates_card.dart';
+import '../requests/data/requests_api.dart';
+import '../requests/list/request_openers.dart';
 import '../requests/list/requests_controller.dart';
 import '../requests/list/requests_screen.dart';
 import '../requests/requests_services.dart';
 import '../tools/data/tool_submitter.dart';
 import '../tools/tools_services.dart';
-import '../tools/ui/tools_card.dart';
 import '../tools/ui/tools_controller.dart';
 import '../tools/ui/tools_screen.dart';
 import '../widget/start_flow.dart';
-import '../workplan/ui/my_work_card.dart';
+import '../workplan/domain/wp_rules.dart';
 import '../workplan/ui/my_work_controller.dart';
 import '../workplan/ui/my_work_screen.dart';
+import '../workplan/ui/notes_sheet.dart';
+import '../workplan/ui/proposals_screen.dart';
+import '../workplan/ui/task_openers.dart';
 import '../workplan/workplan_services.dart';
+import 'wm_nav_bar.dart';
 
 enum _Tab { home, work, requests, history, profile }
 
 /// The signed-in app: Home, My Work (Stage 1c), Requests (Stage 1a), History
 /// and Profile, and the
 /// four-step Time In / Time Out flow launched from Home. The flow is MODAL (no
-/// tabs while recording). Tools (Stage 3b) open from a card on Home; the
+/// tabs while recording). Tools and Agreements open from Home's shortcuts and from Profile; the
 /// temporary-password prompt opens over Home, never over the flow.
 class HomeShell extends StatefulWidget {
   const HomeShell({
@@ -56,6 +64,8 @@ class HomeShell extends StatefulWidget {
     this.workPlan,
     this.tools,
     this.agreements,
+    this.requestsFailedToStart = false,
+    this.workPlanFailedToStart = false,
   });
 
   final WorkerProfile worker;
@@ -78,6 +88,16 @@ class HomeShell extends StatefulWidget {
 
   /// Linked Labor (0113); null shows no My agreements card.
   final AgreementsServices? agreements;
+
+  /// The phone could not open Requests' storage when the app started
+  /// (main.dart): there is no Requests tab, and what it holds cannot be
+  /// counted — so Home's badge stays hidden and Home never says "all caught
+  /// up" (owner decision, 11 Nov 2026). Null [requests] without this is a
+  /// module that is simply off.
+  final bool requestsFailedToStart;
+
+  /// The same for My Work's storage.
+  final bool workPlanFailedToStart;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -340,6 +360,120 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ToolsScreen(controller: c, submitter: s)));
   }
 
+  bool get _isLeader => widget.worker.role == 'teamLeader';
+
+  void _openProposals(MyWorkController work) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ProposalsScreen(controller: work)));
+
+  /// A "Needs you" row's button: opens exactly what the tab would.
+  Future<void> _openNeed(NeedsRow row) async {
+    switch (row.kind) {
+      case NeedsKind.read || NeedsKind.check:
+        final work = _work;
+        final services = widget.workPlan;
+        if (work == null || services == null) return;
+        await openTask(context, work, services, row.target!, onMakeRequest: _requests == null ? null : _openRequests);
+      case NeedsKind.notAccepted:
+        _selectTab(_Tab.work);
+      case NeedsKind.fixRequest || NeedsKind.finishDraft:
+        final requests = _requests;
+        final services = widget.requests;
+        final entry = requests?.entry(row.target!);
+        if (requests == null || services == null || entry == null) return;
+        await openRequestEntry(context, requests, services, entry);
+      case NeedsKind.toolUnresolved || NeedsKind.toolRecords:
+        _openTools();
+    }
+  }
+
+  /// Home's four shortcut columns (spec §4.7); null leaves a column empty.
+  List<ShortcutTile?> _shortcuts() {
+    final work = _work;
+    final requests = _requests;
+    final requestServices = widget.requests;
+    final tools = _tools;
+    final agreements = _agreements;
+    return [
+      tools != null && tools.showCard ? ShortcutTile(id: 'tools', icon: Icons.handyman_outlined, label: 'My tools', onTap: _openTools) : null,
+      agreements != null && agreements.showCard
+          ? ShortcutTile(id: 'agreements', icon: Icons.description_outlined, label: 'My agreements', onTap: _openAgreements)
+          : null,
+      work != null ? ShortcutTile(id: 'notes', icon: Icons.forum_outlined, label: 'Meeting notes', onTap: () => showNotesSheet(context, work)) : null,
+      if (_isLeader)
+        work != null ? ShortcutTile(id: 'proposals', icon: Icons.lightbulb_outline, label: 'My proposals', onTap: () => _openProposals(work)) : null
+      else
+        requests != null && requestServices != null
+            ? ShortcutTile(id: 'new-request', icon: Icons.add, label: 'New request', onTap: () => newRequest(context, requests, requestServices))
+            : null,
+    ];
+  }
+
+  /// "Needs you", the next delivery and the shortcuts; null when no module is on.
+  Widget? _inbox() {
+    final work = _work;
+    final requests = _requests;
+    final submitter = _toolSubmitter;
+    final sources = <Listenable>[?work, ?requests, ?submitter, ?_tools, ?_agreements];
+    if (sources.isEmpty) return null;
+    return ListenableBuilder(
+      listenable: Listenable.merge(sources),
+      builder: (context, _) {
+        final delivery = requests?.updates.nextDelivery;
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (work != null || requests != null || submitter != null)
+            NeedsYouCard(
+              needs: needsYou(
+                work: work?.view.entries ?? (widget.workPlanFailedToStart ? const <WpEntry>[] : null),
+                workOtherFailed: work?.view.otherFailed ?? const [],
+                workRead: work?.read ?? !widget.workPlanFailedToStart,
+                requests: requests?.all ?? (widget.requestsFailedToStart ? const <RequestEntry>[] : null),
+                requestsRead: requests?.read ?? !widget.requestsFailedToStart,
+                toolsUnresolved: submitter?.unresolved,
+                toolRecordsNeedChecking: submitter != null && (submitter.unreadable.isNotEmpty || submitter.recoveryNeeded),
+                toolsRead: submitter?.loaded ?? true,
+              ),
+              onOpen: _openNeed,
+            ),
+          if (delivery != null) NextDeliveryLine(iso: delivery),
+          ShortcutRow(tiles: _shortcuts()),
+        ]);
+      },
+    );
+  }
+
+  /// The badge at the top of Home: everything still on this phone (spec §6).
+  Widget _syncBadge() {
+    final work = _work;
+    final requests = _requests;
+    final submitter = _toolSubmitter;
+    return ListenableBuilder(
+      listenable: Listenable.merge([_home, ?work, ?requests, ?submitter]),
+      builder: (context, _) => SyncBadge(
+        summary: syncSummary([
+          _home.waiting,
+          requests == null ? (widget.requestsFailedToStart ? null : 0) : (requests.read ? requests.updates.pending : null),
+          work == null ? (widget.workPlanFailedToStart ? null : 0) : (work.read ? work.updates.pending : null),
+          submitter == null
+              ? 0
+              : (submitter.loaded ? toolsNotConfirmed(submitter.unresolved.length, submitter.unreadable.length, submitter.recoveryNeeded) : null),
+        ]),
+      ),
+    );
+  }
+
+  /// Home's pull-to-refresh: today's attendance and every module Home shows.
+  Future<void> _refreshAll() async {
+    final submitter = _toolSubmitter;
+    await Future.wait<void>([
+      _home.refresh(),
+      ?_requests?.refresh(),
+      ?_work?.refresh(),
+      ?_tools?.refresh(),
+      // Never reload a loaded store: a reload resets the damaged-store guard.
+      if (submitter != null && !submitter.loaded) submitter.load(widget.worker.id).catchError((Object _) {}),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.services;
@@ -356,30 +490,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     final requests = _requests;
     final work = _work;
-    final tools = _tools;
-    final agreements = _agreements;
-    final cards = [
-      if (work != null)
-        ListenableBuilder(
-          listenable: work,
-          builder: (context, _) => MyWorkCard(updates: work.updates, onOpen: () => _selectTab(_Tab.work)),
-        ),
-      if (requests != null)
-        ListenableBuilder(
-          listenable: requests,
-          builder: (context, _) => RequestUpdatesCard(updates: requests.updates, onOpen: () => _selectTab(_Tab.requests)),
-        ),
-      if (tools != null)
-        ListenableBuilder(
-          listenable: tools,
-          builder: (context, _) => ToolsCard(controller: tools, onOpen: _openTools),
-        ),
-      if (agreements != null)
-        ListenableBuilder(
-          listenable: agreements,
-          builder: (context, _) => AgreementsCard(controller: agreements, onOpen: _openAgreements),
-        ),
-    ];
     final body = switch (_tab) {
       _Tab.home => HomeScreen(
           worker: widget.worker,
@@ -389,32 +499,43 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           openSettings: s.openSettings,
           exitNotice: _exitNotice,
           onDismissExit: () => setState(() => _exitNotice = null),
-          requestUpdates: cards.isEmpty ? null : Column(children: cards),
+          inbox: _inbox(),
+          headerTrailing: _syncBadge(),
+          onRefresh: _refreshAll,
         ),
       _Tab.work => MyWorkScreen(
           controller: work!,
           services: widget.workPlan!,
-          isLeader: widget.worker.role == 'teamLeader',
+          isLeader: _isLeader,
           onMakeRequest: requests == null ? null : _openRequests,
         ),
       _Tab.requests => RequestsScreen(controller: requests!, services: widget.requests!),
       _Tab.history => HistoryScreen(controller: _history, photoUrl: s.photoUrl),
-      _Tab.profile => ProfileScreen(worker: widget.worker, versionName: widget.versionName, onSignOut: widget.onSignOut, account: widget.account),
+      _Tab.profile => ProfileScreen(
+          worker: widget.worker,
+          versionName: widget.versionName,
+          onSignOut: widget.onSignOut,
+          account: widget.account,
+          tools: _tools,
+          onOpenTools: _openTools,
+          agreements: _agreements,
+          onOpenAgreements: _openAgreements,
+        ),
     };
     final tabs = _tabs;
     return Scaffold(
       body: SafeArea(child: body),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: WmNavBar(
         selectedIndex: tabs.indexOf(_tab),
         onDestinationSelected: (i) => _selectTab(tabs[i]),
         destinations: [
           for (final t in tabs)
             switch (t) {
-              _Tab.home => const NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-              _Tab.work => NavigationDestination(icon: _WorkIcon(controller: work!), label: 'My Work'),
-              _Tab.requests => const NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Requests'),
+              _Tab.home => NavigationDestination(icon: Icon(_tab == t ? Icons.home : Icons.home_outlined), label: 'Home'),
+              _Tab.work => NavigationDestination(icon: _WorkIcon(controller: work!, selected: _tab == t), label: 'My Work'),
+              _Tab.requests => NavigationDestination(icon: _RequestsIcon(controller: requests!, selected: _tab == t), label: 'Requests'),
               _Tab.history => const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
-              _Tab.profile => const NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profile'),
+              _Tab.profile => NavigationDestination(icon: Icon(_tab == t ? Icons.person : Icons.person_outline), label: 'Profile'),
             },
         ],
       ),
@@ -425,20 +546,35 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 /// The My Work tab's icon, with a red number for what needs the worker
 /// (tasks to read or check, actions not accepted).
 class _WorkIcon extends StatelessWidget {
-  const _WorkIcon({required this.controller});
+  const _WorkIcon({required this.controller, required this.selected});
   final MyWorkController controller;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: controller,
-        builder: (context, _) {
-          final n = controller.updates.badge;
-          return Badge(
-            key: const Key('my-work-badge'),
-            isLabelVisible: n > 0,
-            label: Text('$n'),
-            child: const Icon(Icons.assignment_outlined),
-          );
-        },
+        builder: (context, _) => RingBadge(
+          key: const Key('my-work-badge'),
+          count: controller.updates.badge,
+          child: Icon(selected ? Icons.assignment : Icons.assignment_outlined),
+        ),
+      );
+}
+
+/// The Requests tab's icon, with a red number for the worker's own requests
+/// the office refused or wants fixed (redesign spec §7.1).
+class _RequestsIcon extends StatelessWidget {
+  const _RequestsIcon({required this.controller, required this.selected});
+  final RequestsController controller;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => RingBadge(
+          key: const Key('requests-badge'),
+          count: ownToFix(controller.all),
+          child: Icon(selected ? Icons.inventory_2 : Icons.inventory_2_outlined),
+        ),
       );
 }

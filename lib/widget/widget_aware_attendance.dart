@@ -42,6 +42,9 @@ class WidgetAwareAttendance implements AttendanceApi {
   Future<List<PendingSubmission>> refusedSubmissions() => _inner.refusedSubmissions();
 
   @override
+  Future<int> waitingCount() => _inner.waitingCount();
+
+  @override
   Future<void> dismissRefused(String eventId) => _inner.dismissRefused(eventId);
 
   Future<void> _tell() async {

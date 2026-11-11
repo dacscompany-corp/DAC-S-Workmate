@@ -27,6 +27,7 @@ class RequestsController extends ChangeNotifier {
   RequestFilter _filter = RequestFilter.all;
   Future<void>? _inFlight;
   bool _again = false;
+  bool _read = false;
 
   bool get loading => _loading;
   RequestsView? get view => _view;
@@ -34,6 +35,10 @@ class RequestsController extends ChangeNotifier {
 
   /// Why the server could not be read; the list may still show the phone's copy.
   RequestFailure? get failure => _failure;
+
+  /// A load has given this phone a list it can trust: the server's, or its
+  /// saved copy. Home says "all caught up" only after this (redesign §5.3).
+  bool get read => _read;
 
   /// Drafts first (newest first), then everything else newest first.
   List<RequestEntry> get all => [
@@ -83,6 +88,7 @@ class RequestsController extends ChangeNotifier {
       final view = await _api.myRequests();
       _drafts = drafts;
       _view = view;
+      if (view.error == null || view.fetchedAt != null) _read = true;
       _failure = view.error == null ? null : RequestFailure.of(view.error!);
     } catch (e) {
       _failure = RequestFailure.of(e);

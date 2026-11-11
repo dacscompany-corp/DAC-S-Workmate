@@ -216,6 +216,7 @@ Future<void> main() async {
   // Requests (Stage 1a): the same worker scope, the same background task. If
   // its database cannot open, the app starts without the Requests tab:
   // attendance must never depend on it.
+  var requestsFailedToStart = false;
   RequestsServices? requests;
   try {
     requests = RequestsServices(
@@ -236,12 +237,14 @@ Future<void> main() async {
     );
   } catch (e) {
     debugPrint('Requests unavailable: $e');
+    requestsFailedToStart = true;
   }
 
   // My Work (Stage 1c): the same worker scope, the same background task. If
   // its database cannot open, the app starts without the My Work tab:
   // attendance must never depend on it. The saved copy is kept for the
   // signed-in worker only (spec §11); unsent actions always wait.
+  var workPlanFailedToStart = false;
   WorkPlanServices? workPlan;
   try {
     final repo = WorkPlanRepository(
@@ -261,6 +264,7 @@ Future<void> main() async {
     workPlan = WorkPlanServices(api: repo, changed: queueSettled, requests: requests?.api);
   } catch (e) {
     debugPrint('My Work unavailable: $e');
+    workPlanFailedToStart = true;
   }
 
   // Buying (Stage 2A-3b): office accounts with the Buyer switch. If its
@@ -322,5 +326,7 @@ Future<void> main() async {
     purchasing: purchasing,
     tools: tools,
     agreements: agreements,
+    requestsFailedToStart: requestsFailedToStart,
+    workPlanFailedToStart: workPlanFailedToStart,
   ));
 }

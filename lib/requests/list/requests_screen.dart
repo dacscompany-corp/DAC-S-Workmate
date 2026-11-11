@@ -8,14 +8,13 @@ import '../../history/domain/history_models.dart';
 import '../../history/ui/find_previous_screen.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
-import '../compose/compose_screen.dart';
 import '../data/requests_api.dart';
-import '../detail/request_detail_screen.dart';
 import '../domain/request_draft.dart';
 import '../domain/request_status.dart';
 import '../requests_services.dart';
 import '../ui/requests_copy.dart';
 import '../ui/sync_chip.dart';
+import 'request_openers.dart';
 import 'requests_controller.dart';
 
 /// The Requests tab (spec §5): create, edit and track requests. A leader also
@@ -25,12 +24,6 @@ class RequestsScreen extends StatelessWidget {
 
   final RequestsController controller;
   final RequestsServices services;
-
-  Future<void> _compose(BuildContext context, RequestDraft draft, {String? editLine}) async {
-    await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => ComposeScreen(draft: draft, services: services, editLineOnOpen: editLine)));
-    await controller.refresh();
-  }
 
   /// Request Again from the tab (spec 1b §4.3 "standalone"): a new draft
   /// holding the picked item, opened on that item for quantity and date;
@@ -57,32 +50,7 @@ class RequestsScreen extends StatelessWidget {
     } catch (_) {
       // Compose saves again on the first change.
     }
-    if (context.mounted) await _compose(context, draft, editLine: line.id);
-  }
-
-  /// The draft is stored on its first change (ComposeController saves every
-  /// change), so backing straight out leaves nothing behind.
-  Future<void> _newRequest(BuildContext context) => _compose(context, services.api.newDraft());
-
-  Future<void> _open(BuildContext context, RequestEntry e) async {
-    if (e.state == SyncState.draft) return _compose(context, e.draft!);
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (detailContext) => RequestDetailScreen(
-        controller: controller,
-        api: services.api,
-        entryKey: e.key,
-        onEditDraft: (draftId) async {
-          final back = await controller.returnToDrafts(draftId);
-          // Only a draft that is editable again: a queued one ignores every save.
-          final e = controller.entry(draftId);
-          final draft = e?.draft;
-          if (!back || e?.state != SyncState.draft || draft == null || !detailContext.mounted || !context.mounted) return;
-          Navigator.of(detailContext).pop();
-          await _compose(context, draft);
-        },
-      ),
-    ));
-    await controller.refresh();
+    if (context.mounted) await composeRequest(context, controller, services, draft, editLine: line.id);
   }
 
   @override
@@ -101,7 +69,7 @@ class RequestsScreen extends StatelessWidget {
                 FilledButton.icon(
                   key: const Key('new-request'),
                   style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
-                  onPressed: () => _newRequest(context),
+                  onPressed: () => newRequest(context, controller, services),
                   icon: const Icon(Icons.add),
                   label: const Text('New request'),
                 ),
@@ -150,7 +118,7 @@ class RequestsScreen extends StatelessWidget {
                   child: Text('Nothing here yet. Tap New request to ask for materials or tools.',
                       textAlign: TextAlign.center, style: TextStyle(color: WmColors.textMuted)),
                 ),
-              for (final e in rows) _EntryCard(key: Key('entry-${e.key}'), entry: e, onTap: () => _open(context, e)),
+              for (final e in rows) _EntryCard(key: Key('entry-${e.key}'), entry: e, onTap: () => openRequestEntry(context, controller, services, e)),
             ]),
           );
         },

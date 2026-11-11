@@ -23,6 +23,7 @@ class MyWorkController extends ChangeNotifier {
   WpFailure? _failure;
   Future<void>? _inFlight;
   bool _again = false;
+  bool _read = false;
 
   WorkPlanApi get api => _api;
   bool get loading => _loading;
@@ -30,6 +31,10 @@ class MyWorkController extends ChangeNotifier {
 
   /// Why the server could not be read; the list may still show the phone's copy.
   WpFailure? get failure => _failure;
+
+  /// A load has given this phone a list it can trust: the server's, or its
+  /// saved copy. Home says "all caught up" only after this (redesign §5.3).
+  bool get read => _read;
 
   /// Manila's calendar date: "today" on a site is never the phone's UTC day.
   String get today => WorkDate.of(now()).iso;
@@ -81,6 +86,7 @@ class MyWorkController extends ChangeNotifier {
     try {
       final view = await _api.load();
       _view = view;
+      if (view.error == null || view.fetchedAt != null) _read = true;
       _failure = view.error == null ? null : WpFailure.of(view.error!);
     } catch (e) {
       _failure = WpFailure.of(e);

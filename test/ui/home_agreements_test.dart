@@ -76,25 +76,31 @@ void main() {
         agreements: agreements,
       );
 
-  testWidgets('a linked worker gets the My agreements card, and it opens their agreements', (tester) async {
+  testWidgets('a linked worker gets the My agreements shortcut and a Profile row, and it opens their agreements', (tester) async {
     useTallPhone(tester);
     final remote = PerAccountRemote({'w13': juansAgreements()});
     await tester.pumpWidget(wrap(shell(juan, AgreementsServices(remote: remote))));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsOneWidget);
+    expect(find.byKey(const Key('shortcut-agreements')), findsOneWidget);
+    expect(find.textContaining('₱'), findsNothing, reason: 'no amount on Home');
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
     expect(find.text('4 agreements'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('agreements-card')));
+    expect(find.textContaining('₱'), findsNothing, reason: 'no amount on Profile');
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agreement-a-main')), findsOneWidget);
     expect(remote.asked.toSet(), {'w13'});
   });
 
-  testWidgets('no linked agreement, or no signal: no card, and nothing else on Home changes', (tester) async {
+  testWidgets('no linked agreement, or no signal: no shortcut, and nothing else on Home changes', (tester) async {
     useTallPhone(tester);
     final remote = FakeAgreementsRemote()..answers.add(noSignal);
     await tester.pumpWidget(wrap(shell(juan, AgreementsServices(remote: remote))));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsNothing);
+    expect(find.byKey(const Key('shortcut-agreements')), findsNothing);
     expect(find.text('Time In'), findsWidgets);
   });
 
@@ -104,11 +110,11 @@ void main() {
     final services = AgreementsServices(remote: remote);
     await tester.pumpWidget(wrap(shell(juan, services)));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsOneWidget);
+    expect(find.byKey(const Key('shortcut-agreements')), findsOneWidget);
     // Same Home widget, another worker (same name, other account): a fresh read for that account.
     await tester.pumpWidget(wrap(shell(other, services)));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsNothing);
+    expect(find.byKey(const Key('shortcut-agreements')), findsNothing);
     expect(remote.asked.last, 'w15');
   });
 
@@ -117,7 +123,7 @@ void main() {
     final remote = PerAccountRemote({'w13': juansAgreements()});
     await tester.pumpWidget(wrap(shell(juan, AgreementsServices(remote: remote))));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('agreements-card')));
+    await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
     expect(find.textContaining('₱'), findsWidgets);
     await tester.pageBack();
@@ -126,7 +132,7 @@ void main() {
     remote
       ..gate = Completer<void>()
       ..fail = noSignal;
-    await tester.tap(find.byKey(const Key('agreements-card')));
+    await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.textContaining('₱'), findsNothing, reason: 'an old figure while checking');
@@ -142,7 +148,7 @@ void main() {
     final remote = PerAccountRemote({'w13': juansAgreements()});
     await tester.pumpWidget(wrap(shell(juan, AgreementsServices(remote: remote))));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('agreements-card')));
+    await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('agreement-a-main')));
     await tester.pumpAndSettle();
@@ -162,10 +168,10 @@ void main() {
     expect(find.textContaining('isn’t shown to you any more'), findsOneWidget);
   });
 
-  testWidgets('without the service (an older setup), Home shows no card at all', (tester) async {
+  testWidgets('without the service (an older setup), Home shows no shortcut at all', (tester) async {
     useTallPhone(tester);
     await tester.pumpWidget(wrap(shell(juan, null)));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agreements-card')), findsNothing);
+    expect(find.byKey(const Key('shortcut-agreements')), findsNothing);
   });
 }

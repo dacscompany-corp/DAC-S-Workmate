@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/failure_notice.dart';
 import '../ui/theme.dart';
+import '../ui/wm_sheet.dart';
 import 'password_change.dart';
 
 /// Changing the password (design screen 11). Everything decidable without
@@ -51,46 +52,32 @@ class _ChangePasswordSheetState extends State<ChangePasswordSheet> {
   @override
   Widget build(BuildContext context) {
     final failure = _failure;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const Text('Change password', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 21)),
-            const SizedBox(height: 6),
-            const Text('Any 8 letters or numbers. Do not share it with anyone.',
-                style: TextStyle(fontSize: 14, color: WmColors.textMuted)),
-            const SizedBox(height: 16),
-            TextField(
-              key: const Key('new-password'),
-              controller: _password,
-              obscureText: true,
-              autofillHints: const [AutofillHints.newPassword],
-              decoration: const InputDecoration(labelText: 'New password'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('confirm-password'),
-              controller: _confirm,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Type it again'),
-              onSubmitted: (_) => _save(),
-            ),
-            if (failure != null) ...[
-              const SizedBox(height: 12),
-              FailureNotice(english: failure.english, tagalog: failure.tagalog),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _busy ? null : _save,
-              child: _busy
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                  : const Text('SAVE PASSWORD'),
-            ),
-          ]),
+    return WmSheetFrame(
+      title: 'Change password',
+      footer: WmSheetButton(label: 'SAVE PASSWORD', icon: Icons.lock_outline, busy: _busy, onPressed: _save),
+      children: [
+        const Text('Any 8 letters or numbers. Do not share it with anyone.', style: TextStyle(fontSize: 14, color: WmColors.textMuted)),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('new-password'),
+          controller: _password,
+          obscureText: true,
+          autofillHints: const [AutofillHints.newPassword],
+          decoration: const InputDecoration(labelText: 'New password'),
         ),
-      ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('confirm-password'),
+          controller: _confirm,
+          obscureText: true,
+          decoration: const InputDecoration(labelText: 'Type it again'),
+          onSubmitted: (_) => _save(),
+        ),
+        if (failure != null) ...[
+          const SizedBox(height: 12),
+          FailureNotice(english: failure.english, tagalog: failure.tagalog),
+        ],
+      ],
     );
   }
 }

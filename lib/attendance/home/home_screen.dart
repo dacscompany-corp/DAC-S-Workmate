@@ -30,7 +30,9 @@ class HomeScreen extends StatefulWidget {
     required this.openSettings,
     this.exitNotice,
     this.onDismissExit,
-    this.requestUpdates,
+    this.inbox,
+    this.headerTrailing,
+    this.onRefresh,
   });
 
   final WorkerProfile worker;
@@ -43,9 +45,15 @@ class HomeScreen extends StatefulWidget {
   final Bilingual? exitNotice;
   final VoidCallback? onDismissExit;
 
-  /// The Requests card (lib/requests/home), below today; null when the app
-  /// has no Requests tab.
-  final Widget? requestUpdates;
+  /// Home's "Needs you", next delivery and shortcuts (lib/home); null when
+  /// the app has none of their modules.
+  final Widget? inbox;
+
+  /// The sync badge, at the right of the header.
+  final Widget? headerTrailing;
+
+  /// Pull-to-refresh; null re-reads today's attendance only.
+  final Future<void> Function()? onRefresh;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -78,9 +86,9 @@ class _HomeScreenState extends State<HomeScreen> {
           final failure = c.failure;
           final exit = widget.exitNotice;
           return RefreshIndicator(
-            onRefresh: c.refresh,
+            onRefresh: widget.onRefresh ?? c.refresh,
             child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
-              WorkerHeader(worker: widget.worker),
+              WorkerHeader(worker: widget.worker, trailing: widget.headerTrailing),
               const SizedBox(height: 18),
               Text('${greetingAt(now).text}, ${widget.worker.firstName}',
                   key: const Key('greeting'),
@@ -111,7 +119,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
               ],
               ..._today(c, failure),
-              ?widget.requestUpdates,
+              // Keyed: _today() is one widget while loading and three after, which
+              // would shift the inbox's index and drop its "Show more" state.
+              if (widget.inbox case final i?) KeyedSubtree(key: const ValueKey('home-inbox'), child: i),
               const SizedBox(height: 20),
               _WeekStrip(cells: c.week, onSeeAll: widget.onSeeHistory),
               const SizedBox(height: 20),
