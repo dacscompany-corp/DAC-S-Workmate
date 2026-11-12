@@ -120,11 +120,11 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     if (widget.onBack case final back?) ...[
                       _RoundButton(key: const Key('wm-sheet-back'), icon: Icons.arrow_back, label: 'Back', onTap: back),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 4),
                     ],
                     Expanded(
                       child: Padding(
-                        padding: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.only(top: 10),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text(widget.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, height: 1.2)),
                           if (subtitle != null) ...[
@@ -134,7 +134,7 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
                         ]),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 4),
                     _RoundButton(key: const Key('wm-sheet-close'), icon: Icons.close, label: 'Close', onTap: _close),
                   ]),
                 ]),
@@ -172,13 +172,24 @@ class _RoundButton extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
         button: true,
         label: label,
-        child: Material(
-          color: WmColors.inert,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(width: 36, height: 36, child: Icon(icon, size: 20, color: WmColors.textSecondary)),
+        // 36 px to look at, 48 px to hit (Phase 2 spec §9).
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkResponse(
+              onTap: onTap,
+              radius: 24,
+              child: Center(
+                child: Ink(
+                  width: 36,
+                  height: 36,
+                  decoration: const BoxDecoration(color: WmColors.inert, shape: BoxShape.circle),
+                  child: Icon(icon, size: 20, color: WmColors.textSecondary),
+                ),
+              ),
+            ),
           ),
         ),
       );
@@ -215,11 +226,26 @@ class WmSheetButton extends StatelessWidget {
               Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(icon, size: 22),
                 const SizedBox(width: 8),
-                Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                Flexible(child: Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3))),
               ]),
               if (tagalog != null)
                 Text(tagalog, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xBFFFFFFF))),
             ]),
     );
   }
+}
+
+/// A short line under a sheet's main button (Phase 2 spec §9): muted, or
+/// brown when it says why the button is locked.
+class WmSheetNote extends StatelessWidget {
+  const WmSheetNote(this.text, {super.key, this.warning = false});
+
+  final String text;
+  final bool warning;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(text, style: TextStyle(fontSize: 13, color: warning ? WmColors.brown : WmColors.textMuted)),
+      );
 }

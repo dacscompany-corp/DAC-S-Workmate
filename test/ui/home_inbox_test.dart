@@ -25,7 +25,7 @@ import 'package:workmate/workplan/domain/wp_op.dart';
 import 'package:workmate/workplan/domain/wp_rules.dart';
 import 'package:workmate/workplan/ui/my_work_screen.dart';
 import 'package:workmate/workplan/ui/proposals_screen.dart';
-import 'package:workmate/workplan/ui/task_screen.dart';
+import 'package:workmate/workplan/ui/task_sheet.dart';
 import 'package:workmate/workplan/workplan_services.dart';
 
 import '../attendance/fakes.dart';
@@ -120,7 +120,7 @@ void main() {
     await showThree(tester);
     await tester.tap(find.byKey(const Key('needs-read-t1')));
     await tester.pumpAndSettle();
-    expect(find.byType(TaskScreen), findsOneWidget);
+    expect(find.byType(TaskSheet), findsOneWidget);
   });
 
   testWidgets('Fix opens that request', (tester) async {
@@ -226,7 +226,7 @@ void main() {
     await showShell(tester, who: ramon, work: work, requests: requestsWith());
     await tester.tap(find.byKey(const Key('needs-check-t3')));
     await tester.pumpAndSettle();
-    expect(find.byType(TaskScreen), findsOneWidget);
+    expect(find.byType(TaskSheet), findsOneWidget);
   });
 
   testWidgets('an unresolved tool record: its Check row opens Tools, with no build-time notification', (tester) async {

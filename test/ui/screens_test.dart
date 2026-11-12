@@ -18,7 +18,7 @@ import 'package:workmate/ui/login_screen.dart';
 import 'package:workmate/ui/terms_screen.dart';
 import 'package:workmate/ui/theme.dart';
 import 'package:workmate/widget/start_flow.dart';
-import 'package:workmate/workplan/ui/task_screen.dart';
+import 'package:workmate/workplan/ui/task_sheet.dart';
 import 'package:workmate/workplan/workplan_services.dart';
 
 import '../attendance/fakes.dart';
@@ -228,12 +228,12 @@ void main() {
     expect(find.descendant(of: find.byKey(const Key('my-work-badge')), matching: find.text('1')), findsOneWidget);
     await tester.tap(find.byKey(const Key('needs-read-t1')));
     await tester.pumpAndSettle();
-    expect(find.byType(TaskScreen), findsOneWidget);
-    await tester.pageBack();
+    expect(find.byType(TaskSheet), findsOneWidget);
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.tap(find.text('My Work').last);
     await tester.pumpAndSettle();
-    expect(find.text('TODAY · 1'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('chip-today')), matching: find.text('1')), findsOneWidget);
     // Requests still has its own tab.
     await tester.tap(find.text('Requests').last);
     await tester.pumpAndSettle();

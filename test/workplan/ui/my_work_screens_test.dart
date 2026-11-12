@@ -4,14 +4,17 @@ import 'package:workmate/requests/data/requests_api.dart';
 import 'package:workmate/requests/domain/remote_request.dart';
 import 'package:workmate/requests/domain/request_status.dart';
 import 'package:workmate/ui/theme.dart';
+import 'package:workmate/ui/wm_sheet.dart';
 import 'package:workmate/workplan/data/workplan_api.dart';
+import 'package:workmate/workplan/data/wp_hint_store.dart';
 import 'package:workmate/workplan/domain/wp_op.dart';
 import 'package:workmate/workplan/domain/wp_rules.dart';
 import 'package:workmate/workplan/domain/wp_task.dart';
 import 'package:workmate/workplan/ui/my_work_controller.dart';
 import 'package:workmate/workplan/ui/my_work_screen.dart';
 import 'package:workmate/workplan/ui/proposals_screen.dart';
-import 'package:workmate/workplan/ui/task_screen.dart';
+import 'package:workmate/workplan/ui/task_openers.dart';
+import 'package:workmate/workplan/ui/task_sheet.dart';
 import 'package:workmate/workplan/workplan_services.dart';
 
 import '../../attendance/fakes.dart';
@@ -61,22 +64,143 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('My Work: sections, what needs the worker first, notes; no proposals for a worker', (tester) async {
+  /// The task opens as a sheet over a plain page (as from My Work or Home).
+  Future<void> openTaskSheet(WidgetTester tester, {VoidCallback? onMakeRequest}) async {
+    useTallPhone(tester);
+    await controller.refresh();
+    await tester.pumpWidget(MaterialApp(
+      theme: workMateTheme(),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: TextButton(
+              onPressed: () => openTask(context, controller, services, 't1', onMakeRequest: onMakeRequest),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('My Work: chips with counts, Today first, notes; no proposals for a worker', (tester) async {
     api.view = viewOf([
       taskDoc(id: 't1', title: 'Skim coat', ackVersion: null),
       taskDoc(id: 't2', title: 'Cabinets', ackVersion: 1, start: '2026-10-20', end: '2026-10-21'),
       taskDoc(id: 't3', title: 'Garage', ackVersion: 1, blocked: true),
     ]);
     await open(tester, MyWorkScreen(controller: controller, services: services, isLeader: false));
-    expect(find.text('TODAY · 1'), findsOneWidget);
-    expect(find.text('UPCOMING · 1'), findsOneWidget);
-    expect(find.text('WAITING · 1'), findsOneWidget);
+    for (final (chip, n) in [('chip-today', '1'), ('chip-upcoming', '1'), ('chip-waiting', '1'), ('chip-done', '0')]) {
+      expect(find.descendant(of: find.byKey(Key(chip)), matching: find.text(n)), findsOneWidget, reason: chip);
+    }
+    expect(find.text('Skim coat'), findsOneWidget, reason: 'Today is selected when the tab opens');
+    expect(find.text('Cabinets'), findsNothing);
     expect(find.text('New'), findsOneWidget);
+    expect(find.text('Next: read the task'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('chip-upcoming')));
+    await tester.pumpAndSettle();
+    expect(find.text('Cabinets'), findsOneWidget);
+    expect(find.text('Skim coat'), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('chip-done'))); // the chip row scrolls sideways
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('chip-done')));
+    await tester.pumpAndSettle();
+    expect(find.text('No tasks here right now.'), findsOneWidget);
     expect(find.text('Meeting notes (1)'), findsOneWidget);
     expect(find.byKey(const Key('open-proposals')), findsNothing);
     await tester.tap(find.byKey(const Key('open-notes')));
     await tester.pumpAndSettle();
     expect(find.text('Skim coat first, then cabinets.'), findsOneWidget);
+  });
+
+  testWidgets('a swipe opens the task on that form and sends nothing; the hint goes and stays gone', (tester) async {
+    final hints = MemoryWpHintStore();
+    services = WorkPlanServices(api: api, takePhoto: (_) async => '/raw/shot.jpg', hints: hints);
+    api.view = viewOf([taskDoc(ackVersion: 1, status: 'in_progress')]);
+    await open(tester, MyWorkScreen(controller: controller, services: services, isLeader: false));
+    expect(find.byKey(const Key('swipe-hint')), findsOneWidget);
+    await tester.timedDrag(find.byKey(const Key('task-t1')), const Offset(-120, 0), const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('swipe-hint')), findsNothing);
+    expect(hints.swipeSeen, isTrue);
+    await tester.tap(find.byKey(const Key('swipe-problem-t1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('problem-field')), findsOneWidget, reason: 'the sheet opened on Report a problem');
+    expect(api.calls, isEmpty, reason: 'nothing is sent by a swipe');
+    await tester.binding.handlePopRoute(); // form → task
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute(); // task → closed
+    await tester.pumpAndSettle();
+    // A fresh screen (new state), as when the tab is opened again: only the store remembers.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(wrap(MyWorkScreen(controller: controller, services: services, isLeader: false)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('swipe-hint')), findsNothing, reason: 'remembered');
+  });
+
+  group('one open card at a time', () {
+    Future<void> openTwo(WidgetTester tester) async {
+      api.view = viewOf([
+        taskDoc(id: 't1', title: 'Skim coat', ackVersion: 1, status: 'in_progress'),
+        taskDoc(id: 't2', title: 'Cabinets', ackVersion: 1, status: 'in_progress'),
+      ]);
+      await open(tester, MyWorkScreen(controller: controller, services: services, isLeader: false));
+    }
+
+    Future<void> swipe(WidgetTester tester, String id) async {
+      await tester.timedDrag(find.byKey(Key('task-$id')), const Offset(-120, 0), const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+    }
+
+    double titleX(WidgetTester tester, String t) => tester.getTopLeft(find.text(t)).dx;
+
+    testWidgets('one card open at a time', (tester) async {
+      await openTwo(tester);
+      final x1 = titleX(tester, 'Skim coat');
+      final x2 = titleX(tester, 'Cabinets');
+      await swipe(tester, 't1');
+      expect(titleX(tester, 'Skim coat'), lessThan(x1));
+      await swipe(tester, 't2');
+      expect(titleX(tester, 'Skim coat'), x1);
+      expect(titleX(tester, 'Cabinets'), lessThan(x2));
+    });
+
+    testWidgets('tapping another card closes the open one', (tester) async {
+      await openTwo(tester);
+      final x1 = titleX(tester, 'Skim coat');
+      await swipe(tester, 't1');
+      expect(titleX(tester, 'Skim coat'), lessThan(x1));
+      await tester.tap(find.byKey(const Key('task-t2')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('swipe-hint')), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(titleX(tester, 'Skim coat'), x1);
+    });
+
+    testWidgets('switching chip closes the open card', (tester) async {
+      await openTwo(tester);
+      final x1 = titleX(tester, 'Skim coat');
+      await swipe(tester, 't1');
+      expect(titleX(tester, 'Skim coat'), lessThan(x1));
+      for (final k in const ['chip-upcoming', 'chip-today']) {
+        await tester.ensureVisible(find.byKey(Key(k)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(Key(k)));
+        await tester.pumpAndSettle();
+      }
+      expect(titleX(tester, 'Skim coat'), x1);
+    });
+  });
+
+  testWidgets('a tap on a card opens the task sheet', (tester) async {
+    api.view = viewOf([taskDoc(ackVersion: 1, status: 'in_progress')]);
+    await open(tester, MyWorkScreen(controller: controller, services: services, isLeader: false));
+    await tester.tap(find.byKey(const Key('task-t1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(TaskSheet), findsOneWidget);
   });
 
   testWidgets('a changed task says what changed; "I\'ve read this" is the first thing to do', (tester) async {
@@ -85,11 +209,11 @@ void main() {
         {'id': 5, 'kind': 'revised', 'note': 'Changed: planned dates', 'by': 'Office', 'at': '2026-10-14T01:00:00+00:00'},
       ]),
     ]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
+    await openTaskSheet(tester);
     expect(find.text('Changed'), findsOneWidget);
     expect(find.text('The office changed this task. Read it again.'), findsOneWidget);
     expect(find.text('Changed: planned dates'), findsWidgets);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('start'))).onPressed, isNull);
+    expect(find.byKey(const Key('start')), findsNothing, reason: "I've read this comes first: Start is not offered yet");
     expect(find.text('Read the task first: tap "I\'ve read this".'), findsOneWidget);
     await tester.tap(find.byKey(const Key('ack')));
     await tester.pumpAndSettle();
@@ -104,8 +228,8 @@ void main() {
         {'task_id': 't0', 'title': 'Wall prep', 'status': 'in_progress'},
       ]),
     ]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
-    expect(tester.widget<FilledButton>(find.byKey(const Key('start'))).onPressed, isNull);
+    await openTaskSheet(tester);
+    expect(tester.widget<WmSheetButton>(find.byKey(const Key('start'))).onPressed, isNull);
     expect(find.textContaining('must be cleared by the office first'), findsOneWidget);
     expect(find.text('Materials: No cement'), findsOneWidget);
     expect(find.text('Earlier task: Wall prep'), findsOneWidget);
@@ -114,14 +238,14 @@ void main() {
 
   testWidgets('Start, then progress with a photo, then report done', (tester) async {
     api.view = viewOf([taskDoc(ackVersion: 1)]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
+    await openTaskSheet(tester);
     await tester.tap(find.byKey(const Key('start')));
     await tester.pumpAndSettle();
     expect(api.calls, ['start:t1']);
 
     await tester.tap(find.byKey(const Key('progress')));
     await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(find.byKey(const Key('note-submit'))).onPressed, isNull, reason: 'a note is required');
+    expect(tester.widget<WmSheetButton>(find.byKey(const Key('note-submit'))).onPressed, isNull, reason: 'a note is required');
     await tester.enterText(find.byKey(const Key('note-field')), 'Half done');
     await tester.tap(find.byKey(const Key('add-photo')));
     await tester.pumpAndSettle();
@@ -139,14 +263,24 @@ void main() {
     expect(api.calls.last, 'done:t1:');
   });
 
-  testWidgets('backing out of a form deletes the photo taken there', (tester) async {
+  testWidgets('a form left and reopened keeps its note and photo; closing the sheet deletes the unsent photo', (tester) async {
     api.view = viewOf([taskDoc(ackVersion: 1, status: 'in_progress')]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
+    await openTaskSheet(tester);
     await tester.tap(find.byKey(const Key('progress')));
     await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('note-field')), 'Half done');
     await tester.tap(find.byKey(const Key('add-photo')));
     await tester.pumpAndSettle();
-    await tester.pageBack();
+    await tester.tap(find.byKey(const Key('wm-sheet-back')));
+    await tester.pumpAndSettle();
+    expect(api.discarded, isEmpty, reason: 'the draft is kept while the sheet is open');
+    await tester.tap(find.byKey(const Key('progress')));
+    await tester.pumpAndSettle();
+    expect(find.text('Half done'), findsOneWidget);
+    expect(find.byKey(const Key('remove-photo')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wm-sheet-back')));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute(); // the task view closes the sheet
     await tester.pumpAndSettle();
     expect(api.discarded, ['/kept/1.jpg']);
     expect(api.calls, isEmpty);
@@ -162,7 +296,7 @@ void main() {
     services = WorkPlanServices(api: api, takePhoto: (_) async => null, requests: requests);
     var madeRequest = 0;
     api.view = viewOf([taskDoc(role: 'helper', ackVersion: 1)]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1', onMakeRequest: () => madeRequest++));
+    await openTaskSheet(tester, onMakeRequest: () => madeRequest++);
     await tester.tap(find.byKey(const Key('problem')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('problem-field')), 'No cement');
@@ -185,9 +319,37 @@ void main() {
     expect(api.calls, hasLength(1), reason: 'nothing is reported or ordered by the shortcut');
   });
 
+  testWidgets('a kept request link that is no longer listed is not sent', (tester) async {
+    final requests = FakeRequestsApi()
+      ..view = RequestsView(entries: [
+        RequestEntry(state: SyncState.received, remote: RemoteRequest.fromJson(requestDoc(id: 'r1'))),
+      ]);
+    services = WorkPlanServices(api: api, takePhoto: (_) async => null, requests: requests);
+    api.view = viewOf([taskDoc(role: 'helper', ackVersion: 1)]);
+    await openTaskSheet(tester);
+    await tester.tap(find.byKey(const Key('problem')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('problem-field')), 'No cement');
+    await tester.tap(find.byKey(const Key('problem-request')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('1 item').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wm-sheet-back')));
+    await tester.pumpAndSettle();
+    requests.view = RequestsView(entries: [
+      RequestEntry(state: SyncState.received, remote: RemoteRequest.fromJson(requestDoc(id: 'r2', mine: false))),
+    ]);
+    await tester.tap(find.byKey(const Key('problem')));
+    await tester.pumpAndSettle();
+    expect(find.text('No cement'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('problem-submit')));
+    await tester.pumpAndSettle();
+    expect(api.calls.single, 'problem:t1:materials:No cement:null:null');
+  });
+
   testWidgets('a leader checks reported work; the office still approves', (tester) async {
     api.view = viewOf([taskDoc(role: 'leader', status: 'reported_done', canCheck: true)]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
+    await openTaskSheet(tester);
     expect(find.text('To check'), findsOneWidget);
     expect(find.byKey(const Key('ack')), findsNothing, reason: 'a leader not on the task does not acknowledge');
     await tester.tap(find.byKey(const Key('check')));
@@ -201,10 +363,14 @@ void main() {
   testWidgets('pending and refused actions are shown on the task, never as sent', (tester) async {
     api.view = viewOf([taskDoc(ackVersion: 1)],
         pending: [anOp(WpOpKind.blocker)], failed: [anOp(WpOpKind.start, error: 'notAcknowledged')]);
-    await open(tester, TaskScreen(controller: controller, services: services, taskId: 't1'));
+    await openTaskSheet(tester);
+    // The sheet's body is a lazy list: scroll the line into view first.
+    await tester.scrollUntilVisible(find.text('Problem report · Pending sync'), 100, scrollable: find.byType(Scrollable).first);
     expect(find.text('Problem report · Pending sync'), findsOneWidget);
     expect(find.text('Start work: This was not accepted.'), findsOneWidget);
     expect(find.textContaining('The office changed this task. Read the new version'), findsOneWidget);
+    await tester.ensureVisible(find.text('Dismiss · Isara'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Dismiss · Isara'));
     await tester.pumpAndSettle();
     expect(api.calls, ['dismiss:op-start']);

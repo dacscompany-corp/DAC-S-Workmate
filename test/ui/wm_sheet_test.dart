@@ -139,4 +139,23 @@ void main() {
     expect(find.text('Body'), findsOneWidget);
     expect(tester.getTopLeft(handle), before);
   });
+
+  testWidgets('the round buttons look 36 px but take taps across 48 px', (tester) async {
+    await open(tester);
+    expect(tester.getSize(find.byKey(const Key('wm-sheet-close'))), const Size(48, 48));
+    final center = tester.getCenter(find.byKey(const Key('wm-sheet-close')));
+    await tester.tapAt(center + const Offset(21, 0)); // outside the 36-px circle, inside the 48-px area
+    await tester.pumpAndSettle();
+    expect(find.text('Body'), findsNothing);
+  });
+
+  testWidgets('a note under the main button: muted, or brown for a lock', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: workMateTheme(),
+      home: const Scaffold(body: Column(children: [WmSheetNote('Saved.'), WmSheetNote('Locked.', warning: true)])),
+    ));
+    expect(tester.widget<Text>(find.text('Saved.')).style!.color, WmColors.textMuted);
+    expect(tester.widget<Text>(find.text('Locked.')).style!.color, WmColors.brown);
+    expect(tester.widget<Text>(find.text('Saved.')).style!.fontSize, 13);
+  });
 }

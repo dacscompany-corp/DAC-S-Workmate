@@ -7,6 +7,7 @@ import '../../requests/data/requests_api.dart';
 import '../../requests/domain/remote_request.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/workplan_api.dart';
 import '../domain/wp_task.dart';
 import '../workplan_services.dart';
@@ -17,6 +18,19 @@ typedef NoteReport = ({String note, String? photo});
 
 /// What the problem form returns.
 typedef ProblemReport = ({String kind, String description, String? requestId, String? photo});
+
+/// What the worker typed or picked in one report form, kept by the task
+/// sheet while it is open (owner decision 12 Nov 2026): leaving a form and
+/// coming back shows it again. Send clears it; closing the sheet deletes an
+/// unsent photo. Never saved beyond the open sheet.
+class ReportDraft {
+  String text = '';
+  String? photo;
+
+  /// Report a problem only.
+  String kind = wpProblemKinds.first;
+  String? requestId;
+}
 
 /// Takes one photo and files it in app-private storage; null when the worker
 /// backed out. A capture that cannot be filed says so.
@@ -70,15 +84,19 @@ class _PhotoRow extends StatelessWidget {
 }
 
 /// A short note (progress, report done, a leader's check), with an optional
-/// photo where 0093 accepts one. Returns null when the worker backed out —
-/// and then any photo taken here is deleted.
-class NoteFormScreen extends StatefulWidget {
-  const NoteFormScreen({
+/// photo where 0093 accepts one. The task sheet keeps what was typed while it
+/// is open and deletes an unsent photo when it closes.
+class NoteForm extends StatefulWidget {
+  const NoteForm({
     super.key,
     required this.services,
     required this.title,
     required this.label,
     required this.submitLabel,
+    required this.taskTitle,
+    required this.draft,
+    required this.onSubmit,
+    required this.onLeave,
     this.required = false,
     this.allowPhoto = false,
     this.explain,
@@ -88,26 +106,35 @@ class NoteFormScreen extends StatefulWidget {
   final String title;
   final String label;
   final String submitLabel;
+
+  /// The task this report is about, shown above the fields.
+  final String taskTitle;
+
+  /// What was typed here before, kept by the task sheet while it is open.
+  final ReportDraft draft;
+
+  /// The worker tapped the send button: the sheet queues it. Never called on back-out.
+  final ValueChanged<NoteReport> onSubmit;
+
+  /// Back to the task (the sheet's back arrow).
+  final VoidCallback onLeave;
   final bool required;
   final bool allowPhoto;
   final String? explain;
 
   @override
-  State<NoteFormScreen> createState() => _NoteFormScreenState();
+  State<NoteForm> createState() => _NoteFormState();
 }
 
-class _NoteFormScreenState extends State<NoteFormScreen> {
-  final _text = TextEditingController();
-  String? _photo;
+class _NoteFormState extends State<NoteForm> {
+  late final _text = TextEditingController(text: widget.draft.text);
+  late String? _photo = widget.draft.photo;
   bool _photoFailed = false;
-  bool _done = false;
 
   @override
   void dispose() {
+    // The draft and its photo belong to the task sheet, which deletes an unsent photo when it closes.
     _text.dispose();
-    // Backed out: the photo is not owed to anyone.
-    final p = _photo;
-    if (!_done && p != null) widget.services.api.discardPhoto(p);
     super.dispose();
   }
 
@@ -118,50 +145,57 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
       return;
     }
     setState(() => _photo = kept ?? _photo);
+    widget.draft.photo = _photo;
   }
 
   void _removePhoto() {
     final p = _photo;
     if (p != null) widget.services.api.discardPhoto(p);
     setState(() => _photo = null);
+    widget.draft.photo = null;
   }
 
   @override
   Widget build(BuildContext context) {
     final ok = !widget.required || _text.text.trim().isNotEmpty;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
-          if (widget.explain != null) ...[Text(widget.explain!, style: const TextStyle(color: WmColors.textMuted)), const SizedBox(height: 12)],
-          TextField(
-            key: const Key('note-field'),
-            controller: _text,
-            minLines: 3,
-            maxLines: 8,
-            maxLength: 2000,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(labelText: widget.label),
-          ),
-          if (widget.allowPhoto) ...[
-            const SizedBox(height: 8),
-            _PhotoRow(photo: _photo, onAdd: _addPhoto, onRemove: _removePhoto, failed: _photoFailed),
-          ],
-          const SizedBox(height: 20),
-          FilledButton(
-            key: const Key('note-submit'),
-            onPressed: ok
-                ? () {
-                    _done = true;
-                    Navigator.of(context).pop<NoteReport>((note: _text.text.trim(), photo: _photo));
-                  }
-                : null,
-            child: Text(widget.submitLabel),
-          ),
+    return WmSheetFrame(
+      title: widget.title,
+      onBack: widget.onLeave,
+      tall: true,
+      footer: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        WmSheetButton(
+          key: const Key('note-submit'),
+          label: widget.submitLabel,
+          icon: Icons.send,
+          onPressed: ok
+              ? () {
+                  widget.onSubmit((note: _text.text.trim(), photo: _photo));
+                }
+              : null,
+        ),
+        const WmSheetNote(savedOnPhoneText),
+      ]),
+      children: [
+        Text(widget.taskTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        if (widget.explain != null) ...[const SizedBox(height: 4), Text(widget.explain!, style: const TextStyle(color: WmColors.textMuted))],
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('note-field'),
+          controller: _text,
+          minLines: 3,
+          maxLines: 8,
+          maxLength: 2000,
+          onChanged: (v) {
+            widget.draft.text = v;
+            setState(() {});
+          },
+          decoration: InputDecoration(labelText: widget.label),
+        ),
+        if (widget.allowPhoto) ...[
           const SizedBox(height: 8),
-          const Text(savedOnPhoneText, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
-        ]),
-      ),
+          _PhotoRow(photo: _photo, onAdd: _addPhoto, onRemove: _removePhoto, failed: _photoFailed),
+        ],
+      ],
     );
   }
 }
@@ -169,27 +203,46 @@ class _NoteFormScreenState extends State<NoteFormScreen> {
 /// Report a problem (spec §8): what kind, what is wrong, an optional photo,
 /// and — for missing materials or a tool — an optional link to one of the
 /// worker's own requests for this project. It never creates a purchase.
-class ProblemFormScreen extends StatefulWidget {
-  const ProblemFormScreen({super.key, required this.services, required this.task, this.onMakeRequest});
+class ProblemForm extends StatefulWidget {
+  const ProblemForm({
+    super.key,
+    required this.services,
+    required this.task,
+    required this.draft,
+    required this.onSubmit,
+    required this.onLeave,
+    this.onMakeRequest,
+  });
 
   final WorkPlanServices services;
   final WpTask task;
+
+  /// What was typed here before, kept by the task sheet while it is open.
+  final ReportDraft draft;
+
+  /// The worker tapped the send button: the sheet queues it. Never called on back-out.
+  final ValueChanged<ProblemReport> onSubmit;
+
+  /// Back to the task (the sheet's back arrow).
+  final VoidCallback onLeave;
 
   /// Opens Requests; null hides the shortcut.
   final VoidCallback? onMakeRequest;
 
   @override
-  State<ProblemFormScreen> createState() => _ProblemFormScreenState();
+  State<ProblemForm> createState() => _ProblemFormState();
 }
 
-class _ProblemFormScreenState extends State<ProblemFormScreen> {
-  final _text = TextEditingController();
-  String _kind = wpProblemKinds.first;
-  String? _requestId;
-  String? _photo;
+class _ProblemFormState extends State<ProblemForm> {
+  late final _text = TextEditingController(text: widget.draft.text);
+  late String _kind = widget.draft.kind;
+  late String? _requestId = widget.draft.requestId;
+  late String? _photo = widget.draft.photo;
   bool _photoFailed = false;
-  bool _done = false;
   late final Future<List<RemoteRequest>> _requests = _loadRequests();
+
+  /// Ids of the requests this form listed: only those may be sent as a link.
+  Set<String> _listed = const {};
 
   /// The worker's open requests for this task's project (0093 accepts only those).
   Future<List<RemoteRequest>> _loadRequests() async {
@@ -197,10 +250,12 @@ class _ProblemFormScreenState extends State<ProblemFormScreen> {
     if (api == null) return const [];
     try {
       final RequestsView view = await api.myRequests();
-      return [
+      final found = [
         for (final r in [for (final e in view.entries) ?e.remote])
           if (r.mine && r.projectId == widget.task.projectId && !r.cancelled) r,
       ];
+      _listed = {for (final r in found) r.id};
+      return found;
     } catch (_) {
       return const [];
     }
@@ -208,9 +263,8 @@ class _ProblemFormScreenState extends State<ProblemFormScreen> {
 
   @override
   void dispose() {
+    // The draft and its photo belong to the task sheet, which deletes an unsent photo when it closes.
     _text.dispose();
-    final p = _photo;
-    if (!_done && p != null) widget.services.api.discardPhoto(p);
     super.dispose();
   }
 
@@ -221,111 +275,122 @@ class _ProblemFormScreenState extends State<ProblemFormScreen> {
       return;
     }
     setState(() => _photo = kept ?? _photo);
+    widget.draft.photo = _photo;
   }
 
   void _removePhoto() {
     final p = _photo;
     if (p != null) widget.services.api.discardPhoto(p);
     setState(() => _photo = null);
+    widget.draft.photo = null;
   }
 
   @override
   Widget build(BuildContext context) {
     final linkable = _kind == 'materials' || _kind == 'tool';
     final ok = _text.text.trim().isNotEmpty;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Report a problem')),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
-          Text(widget.task.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-          const SizedBox(height: 4),
-          const Text(
-            'The task waits until the office checks and clears the problem. Reporting it does not order anything.',
-            style: TextStyle(color: WmColors.textMuted),
-          ),
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final k in wpProblemKinds)
-              ChoiceChip(
-                key: Key('kind-$k'),
-                label: Text(problemKindLabel(k)),
-                selected: _kind == k,
-                onSelected: (_) => setState(() {
-                  _kind = k;
-                  if (!(k == 'materials' || k == 'tool')) _requestId = null;
-                }),
-              ),
-          ]),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('problem-field'),
-            controller: _text,
-            minLines: 3,
-            maxLines: 8,
-            maxLength: 2000,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'What is the problem?'),
-          ),
-          const SizedBox(height: 8),
-          _PhotoRow(photo: _photo, onAdd: _addPhoto, onRemove: _removePhoto, failed: _photoFailed),
-          if (linkable) ...[
-            const SizedBox(height: 16),
-            const Text('Is there already a request for it?', style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 6),
-            FutureBuilder<List<RemoteRequest>>(
-              future: _requests,
-              builder: (context, snap) {
-                final list = snap.data ?? const <RemoteRequest>[];
-                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  if (list.isEmpty)
-                    const Text('No open request of yours for this project.', style: TextStyle(color: WmColors.textMuted))
-                  else
-                    DropdownButtonFormField<String?>(
-                      key: const Key('problem-request'),
-                      initialValue: _requestId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Link to a request'),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('No link')),
-                        for (final r in list)
-                          DropdownMenuItem(
-                            value: r.id,
-                            child: Text('${r.title} · ${r.lines.length} item${r.lines.length == 1 ? '' : 's'} · ${dayMonth(r.receivedAt)}',
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                      ],
-                      onChanged: (v) => setState(() => _requestId = v),
-                    ),
-                  if (widget.onMakeRequest != null)
-                    TextButton.icon(
-                      key: const Key('make-request'),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        widget.onMakeRequest!();
-                      },
-                      icon: const Icon(Icons.add_shopping_cart),
-                      label: const Text('Make a request instead (nothing is sent yet)'),
-                    ),
-                ]);
-              },
+    return WmSheetFrame(
+      title: 'Report a problem',
+      onBack: widget.onLeave,
+      tall: true,
+      footer: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        WmSheetButton(
+          key: const Key('problem-submit'),
+          label: 'Report the problem',
+          icon: Icons.send,
+          onPressed: ok
+              ? () {
+                  widget.onSubmit((kind: _kind, description: _text.text.trim(), requestId: linkable && _listed.contains(_requestId) ? _requestId : null, photo: _photo));
+                }
+              : null,
+        ),
+        const WmSheetNote(savedOnPhoneText),
+      ]),
+      children: [
+        Text(widget.task.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        const SizedBox(height: 4),
+        const Text(
+          'The task waits until the office checks and clears the problem. Reporting it does not order anything.',
+          style: TextStyle(color: WmColors.textMuted),
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final k in wpProblemKinds)
+            ChoiceChip(
+              key: Key('kind-$k'),
+              label: Text(problemKindLabel(k)),
+              selected: _kind == k,
+              onSelected: (_) => setState(() {
+                _kind = k;
+                widget.draft.kind = k;
+                if (!(k == 'materials' || k == 'tool')) {
+                  _requestId = null;
+                  widget.draft.requestId = null;
+                }
+              }),
             ),
-          ],
-          const SizedBox(height: 20),
-          FilledButton(
-            key: const Key('problem-submit'),
-            onPressed: ok
-                ? () {
-                    _done = true;
-                    Navigator.of(context).pop<ProblemReport>(
-                        (kind: _kind, description: _text.text.trim(), requestId: linkable ? _requestId : null, photo: _photo));
-                  }
-                : null,
-            child: const Text('Report the problem'),
-          ),
-          const SizedBox(height: 8),
-          const Text(savedOnPhoneText, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
         ]),
-      ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('problem-field'),
+          controller: _text,
+          minLines: 3,
+          maxLines: 8,
+          maxLength: 2000,
+          onChanged: (v) {
+            widget.draft.text = v;
+            setState(() {});
+          },
+          decoration: const InputDecoration(labelText: 'What is the problem?'),
+        ),
+        const SizedBox(height: 8),
+        _PhotoRow(photo: _photo, onAdd: _addPhoto, onRemove: _removePhoto, failed: _photoFailed),
+        if (linkable) ...[
+          const SizedBox(height: 16),
+          const Text('Is there already a request for it?', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          FutureBuilder<List<RemoteRequest>>(
+            future: _requests,
+            builder: (context, snap) {
+              final list = snap.data ?? const <RemoteRequest>[];
+              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (list.isEmpty)
+                  const Text('No open request of yours for this project.', style: TextStyle(color: WmColors.textMuted))
+                else
+                  DropdownButtonFormField<String?>(
+                    key: const Key('problem-request'),
+                    initialValue: list.any((r) => r.id == _requestId) ? _requestId : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Link to a request'),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('No link')),
+                      for (final r in list)
+                        DropdownMenuItem(
+                          value: r.id,
+                          child: Text('${r.title} · ${r.lines.length} item${r.lines.length == 1 ? '' : 's'} · ${dayMonth(r.receivedAt)}',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: (v) {
+                      widget.draft.requestId = v;
+                      setState(() => _requestId = v);
+                    },
+                  ),
+                if (widget.onMakeRequest != null)
+                  TextButton.icon(
+                    key: const Key('make-request'),
+                    onPressed: () {
+                      widget.onLeave();
+                      widget.onMakeRequest!();
+                    },
+                    icon: const Icon(Icons.add_shopping_cart),
+                    label: const Text('Make a request instead (nothing is sent yet)'),
+                  ),
+              ]);
+            },
+          ),
+        ],
+      ],
     );
   }
 }

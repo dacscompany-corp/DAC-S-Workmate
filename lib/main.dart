@@ -66,6 +66,7 @@ import 'widget/widget_aware_attendance.dart';
 import 'widget/widget_bridge.dart';
 import 'widget/widget_publisher.dart';
 import 'workplan/data/workplan_account_wipe.dart';
+import 'workplan/data/wp_hint_store.dart';
 import 'workplan/data/workplan_db.dart';
 import 'workplan/data/workplan_remote.dart';
 import 'workplan/data/workplan_repository.dart';
@@ -261,7 +262,7 @@ Future<void> main() async {
     final wipe = WorkPlanAccountWipe(repo);
     controller.addListener(() => wipe.onAppState(controller.state));
     wipe.onAppState(controller.state);
-    workPlan = WorkPlanServices(api: repo, changed: queueSettled, requests: requests?.api);
+    workPlan = WorkPlanServices(api: repo, changed: queueSettled, requests: requests?.api, hints: PrefsWpHintStore(prefs));
   } catch (e) {
     debugPrint('My Work unavailable: $e');
     workPlanFailedToStart = true;

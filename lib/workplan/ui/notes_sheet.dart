@@ -6,7 +6,9 @@ import '../../attendance/ui/formats.dart';
 import '../../requests/domain/request_status.dart' show calendarDay;
 import '../../ui/theme.dart';
 import '../../ui/wm_sheet.dart';
+import '../domain/wp_failure.dart';
 import 'my_work_controller.dart';
+import 'workplan_copy.dart';
 import 'workplan_widgets.dart';
 
 /// Shared meeting notes (spec §6) as a swipe-down sheet (redesign Phase 1):
@@ -28,11 +30,23 @@ class NotesSheet extends StatelessWidget {
         listenable: controller,
         builder: (context, _) {
           final notes = controller.view.notes;
+          final failure = controller.failure;
+          final saved = controller.view.fetchedAt;
           return WmSheetFrame(title: 'Meeting notes', children: [
+            if (failure != null && saved != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text('No signal: showing what this phone saved on ${dayMonth(saved)}, ${clockTime(saved)}.',
+                    style: const TextStyle(fontSize: 12.5, color: WmColors.brown)),
+              ),
             if (notes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text('No meeting notes for you yet.', textAlign: TextAlign.center, style: TextStyle(color: WmColors.textMuted)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  failure != null && saved == null ? _unread(failure) : 'No meeting notes for you yet.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: WmColors.textMuted),
+                ),
               ),
             for (final n in notes)
               WpBox(key: Key('note-${n.meetingId}'), children: [
@@ -52,3 +66,7 @@ class NotesSheet extends StatelessWidget {
         },
       );
 }
+
+/// Nothing could be read: say why — never "no notes" (Phase 2 spec §9).
+String _unread(WpFailure f) =>
+    f == WpFailure.noConnection ? 'No signal right now. Open this again when there is signal.' : wpFailureCopy(f).english;
