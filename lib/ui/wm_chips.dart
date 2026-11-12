@@ -32,13 +32,18 @@ class WmCountChip extends StatelessWidget {
                   Container(
                     constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                     padding: const EdgeInsets.symmetric(horizontal: 6),
-                    alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: selected ? const Color(0x33FFFFFF) : WmColors.inert,
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    child: Text('$count',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, height: 1, color: selected ? Colors.white : WmColors.textSecondary)),
+                    // Centred without growing: a Container `alignment` would
+                    // stretch the bubble to the chip's full height.
+                    child: Center(
+                      widthFactor: 1,
+                      heightFactor: 1,
+                      child: Text('$count',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, height: 1, color: selected ? Colors.white : WmColors.textSecondary)),
+                    ),
                   ),
                 ]),
               ),
@@ -135,8 +140,12 @@ class WmChoiceChip extends StatelessWidget {
             child: Container(
               height: 38,
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              alignment: Alignment.center,
-              child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: selected ? Colors.white : WmColors.textSecondary)),
+              // Hugs its label (a Container `alignment` would stretch the chip
+              // to the full width); still fills its share inside an Expanded.
+              child: Center(
+                widthFactor: 1,
+                child: Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: selected ? Colors.white : WmColors.textSecondary)),
+              ),
             ),
           ),
         ),

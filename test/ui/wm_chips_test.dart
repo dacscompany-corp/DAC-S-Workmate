@@ -78,4 +78,33 @@ void main() {
     expect(tester.getSemantics(find.byKey(const Key('y'))), containsSemantics(isSelected: false));
     handle.dispose();
   });
+
+  testWidgets('the count bubble is a small 22-px pill, not the chip\'s full height (1021 phone check)', (tester) async {
+    await tester.pumpWidget(page(Row(children: [
+      WmCountChip(key: const Key('a'), label: 'All', count: 2, selected: true, onTap: () {}),
+    ])));
+    final bubble = find.ancestor(of: find.text('2'), matching: find.byType(DecoratedBox)).first;
+    expect(tester.getSize(bubble).height, 22);
+    expect(tester.getSize(find.byKey(const Key('a'))).height, 38, reason: 'the chip itself is unchanged');
+    expect(tester.getCenter(bubble).dy, tester.getCenter(find.byKey(const Key('a'))).dy, reason: 'centred in the chip');
+  });
+
+  testWidgets('a choice chip hugs its label in a row of chips, and fills its share where it is meant to', (tester) async {
+    await tester.pumpWidget(page(Column(children: [
+      Wrap(spacing: 8, children: [
+        WmChoiceChip(key: const Key('w1'), label: 'Just me', selected: true, onTap: () {}),
+        WmChoiceChip(key: const Key('w2'), label: 'Team A', selected: false, onTap: () {}),
+      ]),
+      Row(children: [
+        Expanded(child: WmChoiceChip(key: const Key('e1'), label: 'Material', selected: true, onTap: () {})),
+        const SizedBox(width: 8),
+        Expanded(child: WmChoiceChip(key: const Key('e2'), label: 'Tool', selected: false, onTap: () {})),
+      ]),
+    ])));
+    final label = tester.getSize(find.text('Just me')).width;
+    expect(tester.getSize(find.byKey(const Key('w1'))).width, label + 32, reason: 'label + 16 px each side, not the full width');
+    expect(tester.getTopLeft(find.byKey(const Key('w2'))).dy, tester.getTopLeft(find.byKey(const Key('w1'))).dy, reason: 'side by side');
+    expect(tester.getSize(find.byKey(const Key('e1'))).width, tester.getSize(find.byKey(const Key('e2'))).width, reason: 'equal shares');
+    expect(tester.getCenter(find.text('Tool')).dx, tester.getCenter(find.byKey(const Key('e2'))).dx, reason: 'label centred');
+  });
 }
