@@ -50,6 +50,22 @@ void main() {
     expect(c.updates.nextDelivery, '2026-10-14');
   });
 
+  test('each filter counts what it shows (the chips\' numbers), whatever filter is selected', () async {
+    api.savedDrafts['d9'] = RequestDraft(id: 'd9', createdAt: DateTime.utc(2026, 10, 4));
+    api.view = RequestsView(entries: [
+      remoteEntry('r1', SyncState.received),
+      remoteEntry('r2', SyncState.pending),
+      remoteEntry('r3', SyncState.needsResolution, conflict: true),
+      remoteEntry('r4', SyncState.failed),
+    ]);
+    final c = RequestsController(api: api, now: () => now);
+    await c.refresh();
+    expect([for (final f in RequestFilter.values) c.count(f)], [5, 1, 1, 2]);
+    c.setFilter(RequestFilter.pending);
+    expect([for (final f in RequestFilter.values) c.count(f)], [5, 1, 1, 2]);
+    expect(c.rows.map((e) => e.key), ['r2']);
+  });
+
   test('no signal: the phone\'s copy stays, with the reason', () async {
     api.view = RequestsView(entries: [remoteEntry('r1', SyncState.received)], fromCache: true, error: const SocketException('down'));
     final c = RequestsController(api: api, now: () => now);

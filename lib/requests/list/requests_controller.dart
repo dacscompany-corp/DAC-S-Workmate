@@ -46,12 +46,17 @@ class RequestsController extends ChangeNotifier {
         ...?_view?.entries,
       ];
 
-  List<RequestEntry> get rows => all.where((e) => switch (_filter) {
+  List<RequestEntry> get rows => all.where((e) => _shows(_filter, e)).toList();
+
+  /// How many requests [f] shows — the chip's number. The same rule as [rows].
+  int count(RequestFilter f) => all.where((e) => _shows(f, e)).length;
+
+  static bool _shows(RequestFilter f, RequestEntry e) => switch (f) {
         RequestFilter.all => true,
         RequestFilter.drafts => e.state == SyncState.draft,
         RequestFilter.pending => e.state == SyncState.pending,
         RequestFilter.attention => e.state == SyncState.failed || e.state == SyncState.needsResolution,
-      }).toList();
+      };
 
   RequestUpdates get updates => summarizeRequests(all, now());
 

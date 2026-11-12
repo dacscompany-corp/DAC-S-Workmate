@@ -9,7 +9,7 @@ import 'package:workmate/auth/worker_profile.dart';
 import 'package:workmate/profile/account_services.dart';
 import 'package:workmate/requests/compose/compose_screen.dart';
 import 'package:workmate/requests/data/requests_api.dart';
-import 'package:workmate/requests/detail/request_detail_screen.dart';
+import 'package:workmate/requests/detail/request_sheet.dart';
 import 'package:workmate/requests/domain/remote_request.dart';
 import 'package:workmate/requests/domain/request_draft.dart';
 import 'package:workmate/requests/domain/request_status.dart';
@@ -127,7 +127,7 @@ void main() {
     await showThree(tester);
     await tester.tap(find.byKey(const Key('needs-fixRequest-r1')));
     await tester.pumpAndSettle();
-    expect(find.byType(RequestDetailScreen), findsOneWidget);
+    expect(find.byType(RequestSheet), findsOneWidget);
   });
 
   testWidgets('Finish opens the draft', (tester) async {

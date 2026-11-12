@@ -33,7 +33,7 @@ void main() {
     useTallPhone(tester);
     await tester.pumpWidget(MaterialApp(
       theme: workMateTheme(),
-      home: ComposeScreen(draft: api.newDraft(), services: services(withHistory: withHistory), now: () => DateTime(2026, 10, 11)),
+      home: Scaffold(body: ComposeScreen(draft: api.newDraft(), services: services(withHistory: withHistory), now: () => DateTime(2026, 10, 11))),
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('add-item')));
@@ -134,7 +134,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('find-previous')));
-    await tester.tap(find.byKey(const Key('find-previous')));
+    // The first tap already opened the search screen; the Navigator ignores this one (no hit on the button is expected).
+    await tester.tap(find.byKey(const Key('find-previous')), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(find.byType(FindPreviousScreen), findsOneWidget);
   });
@@ -146,7 +147,7 @@ void main() {
     api.refsGate = Completer<void>();
     await tester.pumpWidget(MaterialApp(
       theme: workMateTheme(),
-      home: ComposeScreen(draft: draft, services: services(), editLineOnOpen: 'x1', now: () => DateTime(2026, 10, 11)),
+      home: Scaffold(body: ComposeScreen(draft: draft, services: services(), editLineOnOpen: 'x1', now: () => DateTime(2026, 10, 11))),
     ));
     await tester.pump();
     await tester.tap(find.byKey(const Key('line-0')));

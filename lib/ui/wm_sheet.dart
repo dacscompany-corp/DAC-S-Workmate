@@ -119,7 +119,7 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
                   const SizedBox(height: 12),
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     if (widget.onBack case final back?) ...[
-                      _RoundButton(key: const Key('wm-sheet-back'), icon: Icons.arrow_back, label: 'Back', onTap: back),
+                      WmRoundButton(key: const Key('wm-sheet-back'), icon: Icons.arrow_back, label: 'Back', onTap: back),
                       const SizedBox(width: 4),
                     ],
                     Expanded(
@@ -135,7 +135,7 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
                       ),
                     ),
                     const SizedBox(width: 4),
-                    _RoundButton(key: const Key('wm-sheet-close'), icon: Icons.close, label: 'Close', onTap: _close),
+                    WmRoundButton(key: const Key('wm-sheet-close'), icon: Icons.close, label: 'Close', onTap: _close),
                   ]),
                 ]),
               ),
@@ -161,8 +161,9 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
   }
 }
 
-class _RoundButton extends StatelessWidget {
-  const _RoundButton({super.key, required this.icon, required this.label, required this.onTap});
+/// The round 36-px button of the sheets and pages, with a 48-px tap area.
+class WmRoundButton extends StatelessWidget {
+  const WmRoundButton({super.key, required this.icon, required this.label, required this.onTap});
 
   final IconData icon;
   final String label;

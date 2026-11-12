@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import '../../attendance/domain/event_id.dart';
 import '../../attendance/ui/attendance_copy.dart';
 import '../../history/data/history_api.dart';
+import '../../history/domain/history_models.dart';
+import '../../history/ui/find_previous_screen.dart';
 import '../../history/ui/history_thumb.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
+import '../../ui/wm_sheet.dart';
 import '../domain/quantity.dart';
 import '../domain/request_draft.dart';
 import '../domain/request_failure.dart';
@@ -22,7 +26,7 @@ import 'item_editor_screen.dart';
 /// job → one team for the whole request (or just me) → items. Pops true when
 /// the request was queued.
 class ComposeScreen extends StatefulWidget {
-  const ComposeScreen({super.key, required this.draft, required this.services, this.editLineOnOpen, this.now = DateTime.now});
+  const ComposeScreen({super.key, required this.draft, required this.services, this.editLineOnOpen, this.now = DateTime.now, this.resumed = false});
 
   final RequestDraft draft;
   final RequestsServices services;
@@ -32,6 +36,9 @@ class ComposeScreen extends StatefulWidget {
   final String? editLineOnOpen;
   final DateTime Function() now;
 
+  /// Reopened from its draft card: titled "Draft request" (spec §12).
+  final bool resumed;
+
   @override
   State<ComposeScreen> createState() => _ComposeScreenState();
 }
@@ -39,6 +46,9 @@ class ComposeScreen extends StatefulWidget {
 class _ComposeScreenState extends State<ComposeScreen> {
   late final ComposeController _c = ComposeController(api: widget.services.api, draft: widget.draft);
   late final _note = TextEditingController(text: widget.draft.note);
+  late final _quickName = TextEditingController();
+  late final _quickQty = TextEditingController();
+  bool _pickingProject = false;
 
   @override
   void initState() {
@@ -58,40 +68,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
   void dispose() {
     _c.dispose();
     _note.dispose();
+    _quickName.dispose();
+    _quickQty.dispose();
     super.dispose();
   }
 
-  Future<void> _chooseDestination() async {
-    final refs = _c.refs;
-    if (refs == null) return;
-    final picked = await showModalBottomSheet<Destination>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
-          child: ListView(shrinkWrap: true, padding: const EdgeInsets.symmetric(vertical: 12), children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
-              child: Text('Which project and work?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-            ),
-            for (final d in refs.destinations)
-              ListTile(
-                key: Key('dest-${d.workId}'),
-                title: Text(d.projectName, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text(d.workName),
-                leading: Icon(d.isMain ? Icons.home_work_outlined : Icons.add_box_outlined),
-                selected: d == _c.draft.destination,
-                onTap: () => Navigator.of(context).pop(d),
-              ),
-          ]),
-        ),
-      ),
-    );
-    if (picked != null) await _c.setDestination(picked);
-  }
-
-  Future<void> _editLine(DraftLine line, {required bool isNew}) async {
+  Future<bool> _editLine(DraftLine line, {required bool isNew, String search = ''}) async {
     final refs = _c.refs;
     final result = await Navigator.of(context).push<ItemEdit>(MaterialPageRoute(
       builder: (_) => ItemEditorScreen(
@@ -104,15 +86,43 @@ class _ComposeScreenState extends State<ComposeScreen> {
         services: widget.services,
         destinations: refs?.destinations ?? const [],
         now: widget.now,
+        initialSearch: search,
       ),
     ));
     // Backed out: the editor already deleted the photos it took.
-    if (result == null) return;
+    if (result == null) return false;
     if (result.remove) {
       await _c.removeLine(line.id);
-    } else {
-      await _c.putLine(result.line!);
+      return false;
     }
+    await _c.putLine(result.line!);
+    return true;
+  }
+
+  /// The quick-add row: + opens Add item with the typed name in its search
+  /// and the quantity filled in; a saved item clears the two boxes.
+  Future<void> _quickAdd() async {
+    final line = DraftLine(id: newEventId(), quantity: _quickQty.text.trim());
+    if (await _editLine(line, isNew: true, search: _quickName.text.trim()) && mounted) {
+      _quickName.clear();
+      _quickQty.clear();
+    }
+  }
+
+  /// Find previous item from New request: the picked item opens in Add item
+  /// as a new item of this draft.
+  Future<void> _findPrevious(HistoryApi history) async {
+    final refs = _c.refs;
+    final pick = await Navigator.of(context).push<HistoryPick>(MaterialPageRoute(
+      builder: (_) => FindPreviousScreen(
+        history: history,
+        now: widget.now,
+        projects: historyProjects(refs?.destinations ?? const []),
+        categories: historyCategories(refs?.catalog ?? const []),
+      ),
+    ));
+    if (pick == null || !mounted) return;
+    await _editLine(DraftLine.fromHistory(newEventId(), pick), isNew: true);
   }
 
   /// Saved as typed. A failed save is quiet: the words stay in the field and
@@ -120,6 +130,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
   Future<void> _saveNote(String text) => _c.setNote(text).catchError((Object _) {});
 
   Future<void> _send() async {
+    if (_quickName.text.trim().isNotEmpty || _quickQty.text.trim().isNotEmpty) {
+      await _quickAdd(); // the typed item is saved (or the worker backs out) before anything is sent
+      return;
+    }
     // Only a note that changed: Send on an untouched New request must not
     // store an empty draft.
     if (_note.text != _c.draft.note) await _saveNote(_note.text);
@@ -150,115 +164,150 @@ class _ComposeScreenState extends State<ComposeScreen> {
           final d = _c.draft;
           final refs = _c.refs;
           final lineIssues = {for (final i in _c.issues) if (i.line != null) i.line!};
-          return Scaffold(
-              appBar: AppBar(
-                title: const Text('New request'),
-                actions: [
-                  IconButton(key: const Key('draft-delete'), tooltip: 'Delete draft', icon: const Icon(Icons.delete_outline), onPressed: _discard),
-                ],
+          final hasItems = d.lines.isNotEmpty;
+          final dests = refs?.destinations ?? [?d.destination];
+          final history = widget.services.history;
+          return WmSheetFrame(
+            title: widget.resumed ? 'Draft request' : 'New request',
+            tall: true,
+            footer: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (_c.sendFailure != null) ...[
+                FailureNotice(english: requestFailureCopy(_c.sendFailure!).english, tagalog: requestFailureCopy(_c.sendFailure!).tagalog),
+                const SizedBox(height: 12),
+              ],
+              WmSheetButton(
+                key: const Key('send-request'),
+                label: 'SEND REQUEST',
+                icon: Icons.send,
+                onPressed: _c.sending || !hasItems ? null : _send,
               ),
-              body: SafeArea(
-                child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-                  if (_c.loading) const LinearProgressIndicator(),
-                  if (refs == null && _c.refsFailure != null) ...[
-                    FailureNotice(
-                      english: requestFailureCopy(_c.refsFailure!).english,
-                      tagalog: requestFailureCopy(_c.refsFailure!).tagalog,
-                      actions: [noticeAction(retryLabel, _c.load)],
+              WmSheetNote(hasItems ? 'Saved on this phone as you type. It is sent as soon as there is signal.' : 'Add at least one item.'),
+            ]),
+            children: [
+              if (_c.loading) const LinearProgressIndicator(),
+              if (refs == null && _c.refsFailure != null) ...[
+                FailureNotice(
+                  english: requestFailureCopy(_c.refsFailure!).english,
+                  tagalog: requestFailureCopy(_c.refsFailure!).tagalog,
+                  actions: [noticeAction(retryLabel, _c.load)],
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (refs != null && refs.fromCache) ...[
+                const _Note('No signal: using the lists saved on this phone. They are checked again when the request is sent.'),
+                const SizedBox(height: 12),
+              ],
+              const Text('PROJECT AND WORK', style: monoLabel),
+              const SizedBox(height: 8),
+              if (refs != null && refs.destinations.isEmpty && d.destination == null)
+                FailureNotice(english: noDestinationsCopy.english, tagalog: noDestinationsCopy.tagalog)
+              else
+                for (final dest in dests)
+                  if (d.destination == null || _pickingProject || dest == d.destination)
+                    _DestCard(
+                      key: Key('dest-${dest.workId}'),
+                      dest: dest,
+                      selected: dest == d.destination,
+                      onTap: refs == null
+                          ? null
+                          : () {
+                              unawaited(_c.setDestination(dest));
+                              setState(() => _pickingProject = false);
+                            },
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (refs != null && refs.fromCache) ...[
-                    const _Note('No signal: using the lists saved on this phone. They are checked again when the request is sent.'),
-                    const SizedBox(height: 12),
-                  ],
-                  const Text('PROJECT AND WORK', style: monoLabel),
-                  const SizedBox(height: 6),
-                  if (refs != null && refs.destinations.isEmpty && d.destination == null)
-                    FailureNotice(english: noDestinationsCopy.english, tagalog: noDestinationsCopy.tagalog)
-                  else
-                    _Choice(
-                      key: const Key('choose-destination'),
-                      title: d.destination?.projectName ?? 'Choose the project',
-                      subtitle: d.destination?.workName ?? 'Main Contract or an Additional Works job',
-                      error: _c.issues.contains(const DraftIssue(DraftIssueKind.noDestination))
-                          ? draftIssueText(DraftIssueKind.noDestination)
-                          : null,
-                      onTap: refs == null ? null : _chooseDestination,
-                    ),
-                  if (_c.destinationClosed) ...[
-                    const SizedBox(height: 8),
-                    FailureNotice(
-                      english: requestFailureCopy(RequestFailure.destinationClosed).english,
-                      tagalog: requestFailureCopy(RequestFailure.destinationClosed).tagalog,
-                    ),
-                  ],
-                  const SizedBox(height: 18),
-                  const Text('TEAM', style: monoLabel),
-                  const SizedBox(height: 6),
-                  Wrap(spacing: 8, runSpacing: 4, children: [
-                    ChoiceChip(
-                      key: const Key('team-none'),
-                      label: const Text('Just me'),
-                      selected: d.teamId == null,
-                      onSelected: (_) => _c.setTeam(null),
-                    ),
-                    for (final t in refs?.teams ?? const <MyTeam>[])
-                      ChoiceChip(
-                        key: Key('team-${t.id}'),
-                        label: Text(t.iLead ? '${t.name} (you lead)' : t.name),
-                        selected: d.teamId == t.id,
-                        onSelected: (_) => _c.setTeam(t),
-                      ),
-                  ]),
-                  const SizedBox(height: 18),
-                  Text('ITEMS (${d.lines.length})', style: monoLabel),
-                  const SizedBox(height: 6),
-                  for (var i = 0; i < d.lines.length; i++)
-                    _LineCard(
-                      key: Key('line-$i'),
-                      line: d.lines[i],
-                      history: widget.services.history,
-                      hasIssue: lineIssues.contains(i),
-                      onTap: () => _editLine(d.lines[i], isNew: false),
-                    ),
-                  if (_c.issues.contains(const DraftIssue(DraftIssueKind.noLines)))
-                    Text(draftIssueText(DraftIssueKind.noLines), style: const TextStyle(color: WmColors.danger)),
-                  if (_c.issues.contains(const DraftIssue(DraftIssueKind.tooManyLines)))
-                    Text(draftIssueText(DraftIssueKind.tooManyLines), style: const TextStyle(color: WmColors.danger)),
-                  OutlinedButton.icon(
-                    key: const Key('add-item'),
-                    onPressed: refs == null ? null : () => _editLine(DraftLine(id: newEventId()), isNew: true),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add item'),
+              if (d.destination != null && !_pickingProject && !(refs != null && refs.destinations.isEmpty))
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    key: const Key('dest-change'),
+                    onPressed: refs == null ? null : () => setState(() => _pickingProject = true),
+                    child: const Text('Change'),
                   ),
-                  const SizedBox(height: 18),
-                  TextField(
-                    key: const Key('request-note'),
-                    controller: _note,
-                    maxLines: 2,
-                    onChanged: (text) => unawaited(_saveNote(text)),
-                    decoration: const InputDecoration(labelText: 'Note for the office (optional)'),
+                ),
+              if (_c.issues.contains(const DraftIssue(DraftIssueKind.noDestination)))
+                Padding(
+                  padding: const EdgeInsets.only(top: 2, bottom: 4),
+                  child: Text(draftIssueText(DraftIssueKind.noDestination), style: const TextStyle(color: WmColors.danger)),
+                ),
+              if (_c.destinationClosed) ...[
+                const SizedBox(height: 8),
+                FailureNotice(
+                  english: requestFailureCopy(RequestFailure.destinationClosed).english,
+                  tagalog: requestFailureCopy(RequestFailure.destinationClosed).tagalog,
+                ),
+              ],
+              const SizedBox(height: 18),
+              const Text('TEAM', style: monoLabel),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 4, children: [
+                WmChoiceChip(
+                  key: const Key('team-none'),
+                  label: 'Just me',
+                  selected: d.teamId == null,
+                  onTap: () => _c.setTeam(null),
+                ),
+                for (final t in refs?.teams ?? const <MyTeam>[])
+                  WmChoiceChip(
+                    key: Key('team-${t.id}'),
+                    label: t.iLead ? '${t.name} (you lead)' : t.name,
+                    selected: d.teamId == t.id,
+                    onTap: () => _c.setTeam(t),
                   ),
-                  const SizedBox(height: 18),
-                  if (_c.sendFailure != null) ...[
-                    FailureNotice(english: requestFailureCopy(_c.sendFailure!).english, tagalog: requestFailureCopy(_c.sendFailure!).tagalog),
-                    const SizedBox(height: 12),
-                  ],
-                  FilledButton(
-                    key: const Key('send-request'),
-                    onPressed: _c.sending ? null : _send,
-                    child: const Text('SEND REQUEST'),
+              ]),
+              const SizedBox(height: 18),
+              Text('ITEMS (${d.lines.length})', style: monoLabel),
+              const SizedBox(height: 8),
+              for (var i = 0; i < d.lines.length; i++)
+                _LineCard(
+                  key: Key('line-$i'),
+                  line: d.lines[i],
+                  history: widget.services.history,
+                  hasIssue: lineIssues.contains(i),
+                  onTap: () => _editLine(d.lines[i], isNew: false),
+                ),
+              if (_c.issues.contains(const DraftIssue(DraftIssueKind.noLines)))
+                Text(draftIssueText(DraftIssueKind.noLines), style: const TextStyle(color: WmColors.danger)),
+              if (_c.issues.contains(const DraftIssue(DraftIssueKind.tooManyLines)))
+                Text(draftIssueText(DraftIssueKind.tooManyLines), style: const TextStyle(color: WmColors.danger)),
+              _QuickAdd(name: _quickName, qty: _quickQty, onAdd: refs == null ? null : _quickAdd),
+              if (history != null) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: WmPillButton(
+                    key: const Key('compose-find-previous'),
+                    icon: Icons.history,
+                    label: 'Find previous item',
+                    onTap: refs == null ? null : () => _findPrevious(history),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'No signal? It is saved on this phone and sent as soon as there is signal.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12.5, color: WmColors.textMuted),
-                  ),
-                ]),
+                ),
+              ],
+              const SizedBox(height: 18),
+              const Text('NOTE (OPTIONAL)', style: monoLabel),
+              const SizedBox(height: 8),
+              TextField(
+                key: const Key('request-note'),
+                controller: _note,
+                minLines: 2,
+                maxLines: 4,
+                onChanged: (text) => unawaited(_saveNote(text)),
+                decoration: const InputDecoration(hintText: 'Anything the office should know'),
               ),
-            );
+              if (widget.resumed || d.destination != null || d.teamId != null || hasItems || d.note.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const Key('draft-delete'),
+                    onPressed: _discard,
+                    style: TextButton.styleFrom(foregroundColor: WmColors.danger),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Delete draft'),
+                  ),
+                ),
+              ],
+            ],
+          );
         },
       );
 }
@@ -272,38 +321,6 @@ class _Note extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: WmColors.brownTint, borderRadius: BorderRadius.circular(12)),
         child: Text(text, style: const TextStyle(fontSize: 13, color: WmColors.brownDeep)),
-      );
-}
-
-class _Choice extends StatelessWidget {
-  const _Choice({super.key, required this.title, required this.subtitle, required this.onTap, this.error});
-  final String title;
-  final String subtitle;
-  final String? error;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: error == null ? WmColors.border : WmColors.danger),
-          ),
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                Text(subtitle, style: const TextStyle(color: WmColors.textMuted)),
-                if (error != null) Text(error!, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
-              ]),
-            ),
-            const Icon(Icons.chevron_right),
-          ]),
-        ),
       );
 }
 
@@ -365,4 +382,105 @@ class _LineCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One project and work, chosen in place (spec §12): green when chosen.
+class _DestCard extends StatelessWidget {
+  const _DestCard({super.key, required this.dest, required this.selected, required this.onTap});
+
+  final Destination dest;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Semantics(
+          button: true,
+          enabled: onTap != null,
+          selected: selected,
+          child: Material(
+            color: selected ? WmColors.greenTint : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: selected ? WmColors.green : WmColors.border, width: selected ? 1.5 : 1),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Row(children: [
+                  Icon(dest.isMain ? Icons.home_work_outlined : Icons.add_box_outlined, size: 22, color: selected ? WmColors.green : WmColors.textMuted),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(dest.projectName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      Text(dest.workName, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                    ]),
+                  ),
+                  if (selected) const Icon(Icons.check_circle, size: 22, color: WmColors.green),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Item name · Qty · + (spec §12). + opens Add item filled in; nothing is
+/// added to the request until Add item is saved.
+class _QuickAdd extends StatelessWidget {
+  const _QuickAdd({required this.name, required this.qty, required this.onAdd});
+
+  final TextEditingController name;
+  final TextEditingController qty;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              key: const Key('quick-name'),
+              controller: name,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(hintText: 'Item name'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 84,
+            child: TextField(
+              key: const Key('quick-qty'),
+              controller: qty,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => onAdd?.call(),
+              decoration: const InputDecoration(hintText: 'Qty'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Semantics(
+            button: true,
+            enabled: onAdd != null,
+            label: 'Add item',
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Material(
+                key: const Key('add-item'),
+                color: onAdd == null ? WmColors.textDisabled : WmColors.green,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: onAdd,
+                  child: const Icon(Icons.add, color: Colors.white, size: 26),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
 }

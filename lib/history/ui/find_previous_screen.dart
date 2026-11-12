@@ -7,6 +7,8 @@ import '../../attendance/ui/formats.dart';
 import '../../requests/domain/request_models.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
+import '../../ui/wm_page.dart';
 import '../data/history_api.dart';
 import '../domain/history_failure.dart';
 import '../domain/history_models.dart';
@@ -171,10 +173,7 @@ class _FindPreviousScreenState extends State<FindPreviousScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text(findPreviousTitle)),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
+    return WmPage(title: findPreviousTitle, children: [
           TextField(
             key: const Key('history-search'),
             controller: _text,
@@ -188,18 +187,18 @@ class _FindPreviousScreenState extends State<FindPreviousScreen> {
           ),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            ChoiceChip(
+            WmChoiceChip(
               key: const Key('history-kind-all'),
-              label: const Text('All'),
+              label: 'All',
               selected: _query.kind == null,
-              onSelected: (_) => _set(_query.copyWith(kind: null)),
+              onTap: () => _set(_query.copyWith(kind: null)),
             ),
             for (final k in ItemKind.values)
-              ChoiceChip(
+              WmChoiceChip(
                 key: Key('history-kind-${k.wire}'),
-                label: Text(k.label),
+                label: k.label,
                 selected: _query.kind == k,
-                onSelected: (_) => _set(_query.copyWith(kind: k)),
+                onTap: () => _set(_query.copyWith(kind: k)),
               ),
           ]),
           const SizedBox(height: 10),
@@ -230,18 +229,16 @@ class _FindPreviousScreenState extends State<FindPreviousScreen> {
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final p in HistoryPeriod.values)
-              ChoiceChip(
+              WmChoiceChip(
                 key: Key('history-period-${p.name}'),
-                label: Text(p.label),
+                label: p.label,
                 selected: _period == p,
-                onSelected: (_) => _setPeriod(p),
+                onTap: () => _setPeriod(p),
               ),
           ]),
           const SizedBox(height: 14),
           ..._results(),
-        ]),
-      ),
-    );
+    ]);
   }
 
   List<Widget> _results() {

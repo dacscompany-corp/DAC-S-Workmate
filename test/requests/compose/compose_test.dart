@@ -11,6 +11,9 @@ import 'package:workmate/requests/domain/request_failure.dart';
 import 'package:workmate/requests/domain/request_models.dart';
 import 'package:workmate/requests/requests_services.dart';
 import 'package:workmate/ui/theme.dart';
+import 'package:workmate/ui/wm_chips.dart';
+import 'package:workmate/ui/wm_sheet.dart';
+import 'package:workmate/requests/ui/requests_copy.dart';
 
 import '../../attendance/fakes.dart' show useTallPhone;
 import '../request_fakes.dart';
@@ -112,7 +115,7 @@ void main() {
   });
 
   group('ComposeScreen', () {
-    Future<NavigatorState> show(WidgetTester tester, RequestDraft draft, List<Object?> popped) async {
+    Future<NavigatorState> show(WidgetTester tester, RequestDraft draft, List<Object?> popped, {bool resumed = false}) async {
       useTallPhone(tester);
       final nav = GlobalKey<NavigatorState>();
       await tester.pumpWidget(MaterialApp(
@@ -121,13 +124,15 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () async => popped.add(await Navigator.of(context).push<bool>(MaterialPageRoute(
+              onPressed: () async => popped.add(await showWmSheet<bool>(
+                context,
                 builder: (_) => ComposeScreen(
                   draft: draft,
                   services: RequestsServices(api: api, takePhoto: (_) async => '/raw/shot.jpg'),
                   now: () => DateTime(2026, 10, 5),
+                  resumed: resumed,
                 ),
-              ))),
+              )),
               child: const Text('open'),
             ),
           ),
@@ -138,11 +143,91 @@ void main() {
       return nav.currentState!;
     }
 
+    testWidgets('New request is a sheet: projects as cards, quick-add row, SEND REQUEST grey until an item', (tester) async {
+      await show(tester, api.newDraft(), []);
+      expect(find.text('New request'), findsOneWidget);
+      expect(find.byKey(const Key('wm-sheet-close')), findsOneWidget);
+      for (final d in api.refs.destinations) {
+        expect(find.byKey(Key('dest-${d.workId}')), findsOneWidget, reason: d.workName);
+      }
+      expect(find.byKey(const Key('quick-name')), findsOneWidget);
+      expect(find.byKey(const Key('quick-qty')), findsOneWidget);
+      expect(find.byKey(const Key('add-item')), findsOneWidget);
+      expect(tester.widget<WmSheetButton>(find.byKey(const Key('send-request'))).onPressed, isNull, reason: 'no item yet');
+      expect(find.text('Add at least one item.'), findsOneWidget);
+      expect(find.byKey(const Key('draft-delete')), findsNothing, reason: 'nothing saved yet');
+      final first = api.refs.destinations.first;
+      await tester.tap(find.byKey(Key('dest-${first.workId}')));
+      await tester.pumpAndSettle();
+      expect(api.savedDrafts.values.single.destination, first, reason: 'chosen in place, saved as before');
+      expect(find.byKey(const Key('draft-delete')), findsOneWidget);
+    });
+
+    testWidgets('+ opens Add item with the typed name in its search and the quantity filled in', (tester) async {
+      await show(tester, api.newDraft(), []);
+      await tester.enterText(find.byKey(const Key('quick-name')), 'pipe');
+      await tester.enterText(find.byKey(const Key('quick-qty')), '12');
+      await tester.tap(find.byKey(const Key('add-item')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add item'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('item-search'))).controller!.text, 'pipe');
+      expect(tester.widget<TextField>(find.byKey(const Key('item-quantity'))).controller!.text, '12');
+    });
+
+    testWidgets('a resumed draft with only a team chosen still offers Delete draft', (tester) async {
+      final d = api.newDraft().copyWith(teamId: 't1', teamName: 'Masonry A');
+      await api.saveDraft(d);
+      await show(tester, d, [], resumed: true);
+      expect(find.byKey(const Key('draft-delete')), findsOneWidget);
+    });
+
+    testWidgets('the project list collapses to the chosen card with Change, and Change brings every card back', (tester) async {
+      await show(tester, api.newDraft(), []);
+      await tester.tap(find.byKey(const Key('dest-f1')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dest-f9')), findsNothing);
+      expect(find.byKey(const Key('dest-f1')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('dest-change')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dest-f9')), findsOneWidget);
+      expect(find.byKey(const Key('dest-f1')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('dest-f9')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dest-f1')), findsNothing);
+      expect(find.byKey(const Key('dest-f9')), findsOneWidget);
+      expect(find.byKey(const Key('dest-change')), findsOneWidget);
+      expect(api.savedDrafts.values.single.destination, fence);
+    });
+
+    testWidgets('a resumed draft with a project opens collapsed', (tester) async {
+      final d = api.newDraft().copyWith(destination: site);
+      await api.saveDraft(d);
+      await show(tester, d, [], resumed: true);
+      expect(find.byKey(const Key('dest-f9')), findsNothing);
+      expect(find.byKey(const Key('dest-change')), findsOneWidget);
+    });
+
+    testWidgets('SEND REQUEST with text in the quick-add boxes opens Add item first and sends nothing', (tester) async {
+      final d = api.newDraft().copyWith(destination: site, lines: [DraftLine.fromCatalog('x1', pipe).copyWith(quantity: '2')]);
+      await api.saveDraft(d);
+      await show(tester, d, []);
+      await tester.enterText(find.byKey(const Key('quick-name')), 'cement');
+      await tester.ensureVisible(find.byKey(const Key('send-request')));
+      await tester.tap(find.byKey(const Key('send-request')));
+      await tester.pumpAndSettle();
+      expect(find.text('Add item'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('item-search'))).controller!.text, 'cement');
+      expect(api.sent, isEmpty);
+    });
+
+    testWidgets('a saved draft reopens as Draft request', (tester) async {
+      await show(tester, api.newDraft(), [], resumed: true);
+      expect(find.text('Draft request'), findsOneWidget);
+    });
+
     testWidgets('project → team → an item from the list → Send', (tester) async {
       final popped = <Object?>[];
       await show(tester, api.newDraft(), popped);
-      await tester.tap(find.byKey(const Key('choose-destination')));
-      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('dest-f9')));
       await tester.pumpAndSettle();
       expect(find.text('AW-03 Fence'), findsOneWidget);
@@ -209,12 +294,23 @@ void main() {
       expect(line.kind, ItemKind.material);
     });
 
-    testWidgets('Send with nothing chosen says what is missing', (tester) async {
+    testWidgets('Send with nothing chosen says what is missing (an item first)', (tester) async {
       await show(tester, api.newDraft(), []);
+      expect(tester.widget<WmSheetButton>(find.byKey(const Key('send-request'))).onPressed, isNull);
+      expect(find.text('Add at least one item.'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('add-item')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('item-search')), 'pvc');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('catalog-c1')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('item-quantity')), '12');
+      await tester.tap(find.byKey(const Key('item-save')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('send-request')));
       await tester.tap(find.byKey(const Key('send-request')));
       await tester.pumpAndSettle();
-      expect(find.text('Choose the project and the work.'), findsOneWidget);
-      expect(find.text('Add at least one item.'), findsOneWidget);
+      expect(find.text(draftIssueText(DraftIssueKind.noDestination)), findsOneWidget);
       expect(api.sent, isEmpty);
     });
 
@@ -222,7 +318,7 @@ void main() {
       await show(tester, api.newDraft(), []);
       await tester.tap(find.byKey(const Key('send-request')));
       await tester.pumpAndSettle();
-      expect(find.text('Choose the project and the work.'), findsOneWidget);
+      expect(tester.widget<WmSheetButton>(find.byKey(const Key('send-request'))).onPressed, isNull, reason: 'grey: nothing to send');
       expect(api.savedDrafts, isEmpty);
     });
 
@@ -249,7 +345,7 @@ void main() {
       expect(stored.teamId, isNull);
       expect(stored.teamName, isNull);
       expect(stored.lines.single.memberId, isNull);
-      expect(tester.widget<ChoiceChip>(find.byKey(const Key('team-none'))).selected, isTrue);
+      expect(tester.widget<WmChoiceChip>(find.byKey(const Key('team-none'))).selected, isTrue);
     });
 
     testWidgets('a member who left the team opens as "The team", without an assert', (tester) async {
@@ -328,6 +424,48 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
       expect(api.discarded.single, startsWith('/kept/'));
+    });
+
+    testWidgets('a failed SAVE ITEM scrolls the first field with an error into view', (tester) async {
+      await show(tester, api.newDraft().copyWith(destination: site), []);
+      tester.view.physicalSize = const Size(1200, 1500);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(tester.view.reset);
+      await tester.tap(find.byKey(const Key('add-item')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('describe-item')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('item-name')), 'Cement');
+      await tester.enterText(find.byKey(const Key('item-unit')), 'bag');
+      await tester.tap(find.byKey(const Key('item-save')));
+      await tester.pumpAndSettle();
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final quantity = tester.getRect(find.byKey(const Key('item-quantity')));
+      final footerTop = tester.getTopLeft(find.byKey(const Key('item-save'))).dy;
+      expect(quantity.top, greaterThan(60), reason: 'below the header');
+      expect(quantity.bottom, lessThan(footerTop), reason: 'above the pinned SAVE ITEM');
+      expect(quantity.bottom, lessThan(screen.height));
+    });
+
+    testWidgets('the Material / Tool switch: Tool selects, re-tapping keeps it and what was typed, Material comes back', (tester) async {
+      await show(tester, api.newDraft().copyWith(destination: site), []);
+      await tester.tap(find.byKey(const Key('add-item')));
+      await tester.pumpAndSettle();
+      bool selected(String k) => tester.widget<WmChoiceChip>(find.byKey(Key(k))).selected;
+      expect(selected('item-kind-material'), isTrue);
+      await tester.tap(find.byKey(const Key('item-kind-tool')));
+      await tester.pumpAndSettle();
+      expect(selected('item-kind-tool'), isTrue);
+      expect(selected('item-kind-material'), isFalse);
+      await tester.enterText(find.byKey(const Key('item-search')), 'drill');
+      await tester.tap(find.byKey(const Key('item-kind-tool')));
+      await tester.pumpAndSettle();
+      expect(selected('item-kind-tool'), isTrue);
+      expect(tester.widget<TextField>(find.byKey(const Key('item-search'))).controller!.text, 'drill');
+      await tester.tap(find.byKey(const Key('item-kind-material')));
+      await tester.pumpAndSettle();
+      expect(selected('item-kind-material'), isTrue);
+      expect(selected('item-kind-tool'), isFalse);
     });
   });
 }

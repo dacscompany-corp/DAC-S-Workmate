@@ -8,10 +8,12 @@ import '../../history/domain/history_models.dart';
 import '../../history/ui/find_previous_screen.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
 import '../data/requests_api.dart';
 import '../domain/request_draft.dart';
 import '../domain/request_status.dart';
 import '../requests_services.dart';
+import '../ui/request_stage.dart';
 import '../ui/requests_copy.dart';
 import '../ui/sync_chip.dart';
 import 'request_openers.dart';
@@ -63,9 +65,9 @@ class RequestsScreen extends StatelessWidget {
           final view = c.view;
           return RefreshIndicator(
             onRefresh: c.refresh,
-            child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
+            child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20, 16, 20, 28), children: [
               Row(children: [
-                const Expanded(child: Text('Requests', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800))),
+                const Expanded(child: Text('Requests', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
                 FilledButton.icon(
                   key: const Key('new-request'),
                   style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
@@ -74,11 +76,11 @@ class RequestsScreen extends StatelessWidget {
                   label: const Text('New request'),
                 ),
               ]),
-              const SizedBox(height: 4),
-              const Text('Materials and tools for your projects.', style: TextStyle(color: WmColors.textMuted)),
+              const SizedBox(height: 2),
+              const Text('Materials and tools for your projects.', style: TextStyle(fontSize: 14, color: WmColors.textMuted)),
               if (services.history case final history?) ...[
-                const SizedBox(height: 10),
-                _FindPreviousButton(onPressed: () => _findPrevious(context, history)),
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerLeft, child: _FindPreviousButton(onPressed: () => _findPrevious(context, history))),
               ],
               const SizedBox(height: 12),
               if (failure != null) ...[
@@ -95,21 +97,15 @@ class RequestsScreen extends StatelessWidget {
                   ),
                 const SizedBox(height: 12),
               ],
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(children: [
-                  for (final (f, label) in const [
-                    (RequestFilter.all, 'All'),
-                    (RequestFilter.drafts, 'Drafts'),
-                    (RequestFilter.pending, 'Pending sync'),
-                    (RequestFilter.attention, 'Needs attention'),
-                  ])
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(key: Key('filter-${f.name}'), label: Text(label), selected: c.filter == f, onSelected: (_) => c.setFilter(f)),
-                    ),
-                ]),
-              ),
+              WmChipRow(children: [
+                for (final (f, label) in const [
+                  (RequestFilter.all, 'All'),
+                  (RequestFilter.drafts, 'Drafts'),
+                  (RequestFilter.pending, 'Pending sync'),
+                  (RequestFilter.attention, 'Needs attention'),
+                ])
+                  WmCountChip(key: Key('filter-${f.name}'), label: label, count: c.count(f), selected: c.filter == f, onTap: () => c.setFilter(f)),
+              ]),
               const SizedBox(height: 12),
               if (c.loading && rows.isEmpty) const Padding(padding: EdgeInsets.only(top: 40), child: Center(child: CircularProgressIndicator())),
               if (!c.loading && rows.isEmpty)
@@ -140,29 +136,42 @@ class _EntryCard extends StatelessWidget {
     final when = r?.receivedAt ?? d!.createdAt;
     final who = r != null && !r.mine ? 'From ${r.requesterName} · ' : '';
     final delivery = r == null ? null : nextDelivery([r], DateTime.now());
+    final stage = stageOf(entry.state);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: WmColors.border)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-              SyncChip(entry.state),
-            ]),
-            const SizedBox(height: 4),
-            Text('$who$lines item${lines == 1 ? '' : 's'} · ${dayMonth(when)}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
-            if (urgent || delivery != null) ...[
-              const SizedBox(height: 6),
-              Wrap(spacing: 8, children: [
-                if (urgent) const UrgentTag(),
-                if (delivery != null) Text('Next delivery ${calendarDay(delivery)}', style: const TextStyle(fontSize: 13, color: WmColors.green)),
+      // A white Material under the InkWell, so the tap ripple shows.
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: needsMe(entry) ? WmColors.danger : WmColors.border),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, height: 1.25))),
+                const SizedBox(width: 8),
+                SyncChip(entry.state),
               ]),
-            ],
-          ]),
+              const SizedBox(height: 4),
+              Text('$who$lines item${lines == 1 ? '' : 's'} · ${dayMonth(when)}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
+              const SizedBox(height: 12),
+              RequestStageBar(stage),
+              const SizedBox(height: 8),
+              RequestStageLine(stage),
+              if (urgent || delivery != null) ...[
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                  if (urgent) const UrgentTag(),
+                  if (delivery != null) Text('Next delivery ${calendarDay(delivery)}', style: const TextStyle(fontSize: 13, color: WmColors.green)),
+                ]),
+              ],
+            ]),
+          ),
         ),
       ),
     );
@@ -194,14 +203,11 @@ class _FindPreviousButtonState extends State<_FindPreviousButton> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      key: const Key('find-previous'),
-      onPressed: _busy ? null : _run,
-      icon: _busy
-          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-          : const Icon(Icons.history),
-      label: const Text('Find previous item'),
-    );
-  }
+  Widget build(BuildContext context) => WmPillButton(
+        key: const Key('find-previous'),
+        icon: Icons.history,
+        label: 'Find previous item',
+        busy: _busy,
+        onTap: _run,
+      );
 }

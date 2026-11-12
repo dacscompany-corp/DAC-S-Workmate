@@ -4,6 +4,7 @@ import '../../attendance/ui/attendance_copy.dart';
 import '../../attendance/ui/formats.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/requests_api.dart';
 import '../domain/quantity.dart';
 import '../domain/remote_request.dart';
@@ -11,15 +12,18 @@ import '../domain/request_draft.dart';
 import '../domain/request_op.dart';
 import '../domain/request_status.dart';
 import '../list/requests_controller.dart';
+import '../ui/request_stage.dart';
 import '../ui/requests_copy.dart';
 import '../ui/sync_chip.dart';
 
-/// One request: each item's progress and expected delivery per weekly batch,
-/// what is still on the phone, what was refused, and — for the requester —
-/// quantity changes and cancelling. Reads its entry from the shared
-/// controller by [entryKey], so it follows every refresh.
-class RequestDetailScreen extends StatelessWidget {
-  const RequestDetailScreen({
+/// One request as a tall swipe-down sheet (redesign Phase 3 spec §6): its
+/// state at a glance (bar + status line), then everything the old page showed —
+/// each item's progress and expected delivery per weekly batch, what is still
+/// on the phone, what was refused, and — for the requester — quantity changes
+/// and cancelling. Reads its entry from the shared controller by [entryKey], so
+/// it follows every refresh.
+class RequestSheet extends StatelessWidget {
+  const RequestSheet({
     super.key,
     required this.controller,
     required this.api,
@@ -74,23 +78,59 @@ class RequestDetailScreen extends StatelessWidget {
         listenable: controller,
         builder: (context, _) {
           final e = controller.entry(entryKey);
-          return Scaffold(
-            appBar: AppBar(title: const Text('Request')),
-            body: SafeArea(
-              child: e == null
-                  ? const Center(child: Text('This request is no longer on the list.'))
-                  : RefreshIndicator(
-                      onRefresh: controller.refresh,
-                      child: ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                        children: e.remote != null ? _remote(context, e, e.remote!) : _onPhone(e, e.draft!),
-                      ),
-                    ),
-            ),
+          if (e == null) {
+            return const WmSheetFrame(title: 'Request', children: [
+              Padding(
+                key: Key('request-gone'),
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('This request is no longer on the list.', textAlign: TextAlign.center),
+              ),
+            ]);
+          }
+          final r = e.remote;
+          final d = e.draft;
+          return WmSheetFrame(
+            key: const Key('request-sheet'),
+            title: r?.title ?? d?.destination?.label ?? 'New request',
+            tall: true,
+            footer: r == null ? null : _footer(context, e, r),
+            children: r != null ? _remote(context, e, r) : _onPhone(e, d!),
           );
         },
       );
+
+  /// Cancel the whole request: only the requester, only while something is
+  /// open, and not twice (spec §6).
+  Widget? _footer(BuildContext context, RequestEntry e, RemoteRequest r) {
+    if (!canCancelRequest(r) || e.pendingOps.any((o) => o.kind == OpKind.cancelRequest)) return null;
+    return OutlinedButton.icon(
+      key: const Key('cancel-request'),
+      onPressed: () => _cancelRequest(context, r),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        foregroundColor: WmColors.danger,
+        backgroundColor: Colors.white,
+        side: const BorderSide(color: WmColors.dangerBorder),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        textStyle: const TextStyle(fontFamily: 'Barlow', fontSize: 14.5, fontWeight: FontWeight.w800),
+      ),
+      icon: const Icon(Icons.cancel_outlined, size: 20),
+      label: const Text('Cancel the whole request'),
+    );
+  }
+
+  /// The pill and the meta line, then the status box.
+  List<Widget> _head(RequestEntry e, String meta) => [
+        Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          SyncChip(e.state),
+          Text(meta, style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
+        ]),
+        const SizedBox(height: 14),
+        _StatusBox(stage: stageOf(e.state)),
+        const SizedBox(height: 12),
+      ];
+
+  Widget _itemsLabel(int n) => Padding(padding: const EdgeInsets.only(top: 4, bottom: 8), child: Text('ITEMS ($n)', style: monoLabel));
 
   List<Widget> _failures(RequestEntry e) => [
         for (final op in e.failedOps)
@@ -113,17 +153,13 @@ class RequestDetailScreen extends StatelessWidget {
 
   /// Sent from this phone, not yet confirmed by the server (or refused).
   List<Widget> _onPhone(RequestEntry e, RequestDraft d) => [
-        Row(children: [
-          Expanded(child: Text(d.destination?.label ?? '', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-          SyncChip(e.state),
-        ]),
-        const SizedBox(height: 4),
-        Text(d.teamName == null ? 'Just me' : 'Team ${d.teamName}', style: const TextStyle(color: WmColors.textMuted)),
-        const SizedBox(height: 12),
-        if (e.state == SyncState.pending)
+        ..._head(e, d.teamName == null ? 'Just me' : 'Team ${d.teamName}'),
+        if (e.state == SyncState.pending) ...[
           const Text('Saved on this phone. It is sent as soon as there is signal.', style: TextStyle(color: WmColors.brown)),
+          const SizedBox(height: 8),
+        ],
         ..._failures(e),
-        const SizedBox(height: 8),
+        _itemsLabel(d.lines.length),
         for (final l in d.lines)
           _Card(children: [
             Text(l.description, style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -136,32 +172,23 @@ class RequestDetailScreen extends StatelessWidget {
       ];
 
   List<Widget> _remote(BuildContext context, RequestEntry e, RemoteRequest r) => [
-        Row(children: [
-          Expanded(child: Text(r.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-          SyncChip(e.state),
-        ]),
-        const SizedBox(height: 4),
-        Text(
+        ..._head(
+          e,
           [
             if (!r.mine) 'From ${r.requesterName}',
             r.teamName == null ? 'Just me' : 'Team ${r.teamName}',
             'Received ${dayMonth(r.receivedAt)}, ${clockTime(r.receivedAt)}',
           ].join(' · '),
-          style: const TextStyle(color: WmColors.textMuted),
         ),
-        if (r.note.isNotEmpty) ...[const SizedBox(height: 6), Text(r.note)],
-        // The chip says it already, unless something unsent outranks it.
-        if (r.cancelled && e.state != SyncState.cancelled) ...[const SizedBox(height: 8), const Text('Cancelled', style: TextStyle(color: WmColors.danger, fontWeight: FontWeight.w700))],
-        const SizedBox(height: 12),
+        if (r.note.isNotEmpty) ...[Text(r.note), const SizedBox(height: 8)],
+        // The pill says it already, unless something unsent outranks it.
+        if (r.cancelled && e.state != SyncState.cancelled) ...[
+          const Text('Cancelled', style: TextStyle(color: WmColors.danger, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+        ],
         ..._failures(e),
+        _itemsLabel(r.lines.length),
         for (final l in r.lines) _line(context, e, r, l),
-        if (canCancelRequest(r) && !e.pendingOps.any((o) => o.kind == OpKind.cancelRequest))
-          TextButton(
-            key: const Key('cancel-request'),
-            onPressed: () => _cancelRequest(context, r),
-            style: TextButton.styleFrom(foregroundColor: WmColors.danger),
-            child: const Text('Cancel the whole request'),
-          ),
       ];
 
   Widget _line(BuildContext context, RequestEntry e, RemoteRequest r, RemoteLine l) {
@@ -347,4 +374,31 @@ class _QuantityDialogState extends State<_QuantityDialog> {
       ],
     );
   }
+}
+
+/// The bar, its three labels and the status line, in a white card (spec §6).
+class _StatusBox extends StatelessWidget {
+  const _StatusBox({required this.stage});
+
+  final RequestStage stage;
+
+  static const _label = TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: WmColors.textMuted);
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: const Key('request-status'),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: WmColors.border)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          RequestStageBar(stage),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(child: Text(requestStageLabels[0], style: _label)),
+            Expanded(child: Text(requestStageLabels[1], textAlign: TextAlign.center, style: _label)),
+            Expanded(child: Text(requestStageLabels[2], textAlign: TextAlign.right, style: _label)),
+          ]),
+          const SizedBox(height: 10),
+          RequestStageLine(stage, size: 14, iconSize: 18),
+        ]),
+      );
 }

@@ -6,6 +6,7 @@ import '../../attendance/ui/attendance_copy.dart';
 import '../../attendance/ui/formats.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
 import '../domain/wp_rules.dart';
 import '../workplan_services.dart';
 import 'my_work_controller.dart';
@@ -79,14 +80,14 @@ class _MyWorkScreenState extends State<MyWorkScreen> {
                   style: TextStyle(fontSize: 14, color: WmColors.textMuted)),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
-                _PillButton(
+                WmPillButton(
                   key: const Key('open-notes'),
                   icon: Icons.forum_outlined,
                   label: 'Meeting notes (${view.notes.length})',
                   onTap: () => showNotesSheet(context, c),
                 ),
                 if (widget.isLeader)
-                  _PillButton(
+                  WmPillButton(
                     key: const Key('open-proposals'),
                     icon: Icons.lightbulb_outline,
                     label: 'My proposals',
@@ -135,34 +136,19 @@ class _MyWorkScreenState extends State<MyWorkScreen> {
                 ),
               if (view.entries.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                SizedBox(
-                  height: 38,
-                  child: LayoutBuilder(
-                    builder: (context, box) => OverflowBox(
-                      maxWidth: box.maxWidth + 40,
-                      minWidth: box.maxWidth + 40,
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(children: [
-                    for (final g in WpGroup.values) ...[
-                      if (g != WpGroup.values.first) const SizedBox(width: 8),
-                      _Chip(
-                        key: Key('chip-${g.name}'),
-                        label: _chipLabels[g]!,
-                        count: c.group(g).length,
-                        selected: g == _chip,
-                        onTap: () => setState(() {
-                          _chip = g;
-                          _openId = null;
-                        }),
-                      ),
-                    ],
-                        ]),
-                      ),
+                WmChipRow(children: [
+                  for (final g in WpGroup.values)
+                    WmCountChip(
+                      key: Key('chip-${g.name}'),
+                      label: _chipLabels[g]!,
+                      count: c.group(g).length,
+                      selected: g == _chip,
+                      onTap: () => setState(() {
+                        _chip = g;
+                        _openId = null;
+                      }),
                     ),
-                  ),
-                ),
+                ]),
                 if (!_hintSeen && rows.any(canSwipe))
                   const Padding(
                     key: Key('swipe-hint'),
@@ -199,70 +185,5 @@ class _MyWorkScreenState extends State<MyWorkScreen> {
             ]),
           );
         },
-      );
-}
-
-class _PillButton extends StatelessWidget {
-  const _PillButton({super.key, required this.icon, required this.label, required this.onTap});
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-        color: Colors.white,
-        shape: const StadiumBorder(side: BorderSide(color: WmColors.border)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onTap,
-          child: Container(
-            height: 40,
-            padding: const EdgeInsets.fromLTRB(10, 0, 14, 0),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon, size: 20, color: WmColors.green),
-              const SizedBox(width: 6),
-              Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: WmColors.green)),
-            ]),
-          ),
-        ),
-      );
-}
-
-class _Chip extends StatelessWidget {
-  const _Chip({super.key, required this.label, required this.count, required this.selected, required this.onTap});
-
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Material(
-        color: selected ? WmColors.text : Colors.white,
-        shape: StadiumBorder(side: BorderSide(color: selected ? WmColors.text : WmColors.border)),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onTap,
-          child: Container(
-            height: 38,
-            padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: selected ? Colors.white : WmColors.textSecondary)),
-              const SizedBox(width: 8),
-              Container(
-                constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: selected ? const Color(0x33FFFFFF) : WmColors.inert,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Text('$count',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, height: 1, color: selected ? Colors.white : WmColors.textSecondary)),
-              ),
-            ]),
-          ),
-        ),
       );
 }

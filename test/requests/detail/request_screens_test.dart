@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:workmate/requests/compose/compose_screen.dart';
 import 'package:workmate/requests/data/requests_api.dart';
-import 'package:workmate/requests/detail/request_detail_screen.dart';
+import 'package:workmate/requests/detail/request_sheet.dart';
 import 'package:workmate/requests/domain/remote_request.dart';
 import 'package:workmate/requests/domain/request_draft.dart';
 import 'package:workmate/requests/domain/request_op.dart';
 import 'package:workmate/requests/domain/request_status.dart';
+import 'package:workmate/requests/list/request_openers.dart';
 import 'package:workmate/requests/list/requests_controller.dart';
 import 'package:workmate/requests/list/requests_screen.dart';
 import 'package:workmate/requests/requests_services.dart';
 import 'package:workmate/requests/ui/requests_copy.dart';
+import 'package:workmate/requests/ui/sync_chip.dart';
 import 'package:workmate/ui/theme.dart';
 
 import '../../attendance/fakes.dart' show useTallPhone;
@@ -28,13 +30,24 @@ void main() {
   RequestEntry entry(Map<String, dynamic> doc, {SyncState state = SyncState.received, List<RequestOp> pending = const [], List<RequestOp> failed = const []}) =>
       RequestEntry(state: state, remote: RemoteRequest.fromJson(doc), pendingOps: pending, failedOps: failed);
 
+  /// The request opens as a sheet over a plain page, as from the tab or Home.
   Future<void> showDetail(WidgetTester tester, String key) async {
     useTallPhone(tester);
     await controller.refresh();
     await tester.pumpWidget(MaterialApp(
       theme: workMateTheme(),
-      home: RequestDetailScreen(controller: controller, api: api, entryKey: key, onEditDraft: (_) {}),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => Center(
+            child: TextButton(
+              onPressed: () => openRequestEntry(context, controller, RequestsServices(api: api, takePhoto: (_) async => null), controller.entry(key)!),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
     ));
+    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
   }
 
@@ -42,7 +55,7 @@ void main() {
     api.view = RequestsView(entries: [entry(requestDoc())]);
     await showDetail(tester, 'r1');
     expect(find.text('Santos Townhouse · Main Contract'), findsOneWidget);
-    expect(find.text('Received'), findsOneWidget);
+    expect(find.descendant(of: find.byType(SyncChip), matching: find.text('Received')), findsOneWidget);
     expect(find.text('10 pc · Arranged · Expected Wed 14 Oct'), findsOneWidget);
     expect(find.text('2.5 pc · Expected Wed 21 Oct'), findsOneWidget);
     expect(find.text('Office is checking a change'), findsOneWidget);
@@ -56,7 +69,8 @@ void main() {
     final doc = requestDoc();
     (doc['lines'] as List).first['from_stock'] = 4;
     api.view = RequestsView(entries: [entry(doc)]);
-    await showDetail(tester, 'r1');
+    await controller.refresh();
+    await tester.pumpAndSettle();
     expect(find.text('From stock: 4 pc · Galing sa stock'), findsOneWidget);
   });
 
@@ -138,10 +152,14 @@ void main() {
     expect(find.text('Draft'), findsOneWidget);
     expect(find.text('Received'), findsOneWidget);
     expect(find.text('Pending sync'), findsWidgets);
+    await tester.ensureVisible(find.byKey(const Key('filter-pending')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('filter-pending')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('entry-r2')), findsOneWidget);
     expect(find.byKey(const Key('entry-r1')), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('filter-all')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('filter-all')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('entry-d7')));
@@ -161,8 +179,53 @@ void main() {
       home: Scaffold(body: RequestsScreen(controller: controller, services: RequestsServices(api: api, takePhoto: (_) async => null))),
     ));
     await tester.pumpAndSettle();
-    expect(find.descendant(of: find.byKey(const Key('entry-r1')), matching: find.text('Cancelled')), findsOneWidget);
+    final card = find.byKey(const Key('entry-r1'));
+    expect(find.descendant(of: find.descendant(of: card, matching: find.byType(SyncChip)), matching: find.text('Cancelled')), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Cancelled')), findsNWidgets(2), reason: 'the pill and the status line');
     expect(find.text('Received'), findsNothing);
+  });
+
+  testWidgets('the sheet: pill and meta, the status box with Saved · Sent · Received, then ITEMS', (tester) async {
+    api.view = RequestsView(entries: [entry(requestDoc())]);
+    await showDetail(tester, 'r1');
+    expect(find.byKey(const Key('request-sheet')), findsOneWidget);
+    expect(find.text('Santos Townhouse · Main Contract'), findsOneWidget, reason: 'the title');
+    expect(find.text('Just me · Received 5 Oct, 11:00 AM'), findsOneWidget);
+    expect(find.byKey(const Key('request-status')), findsOneWidget);
+    for (final label in ['Saved', 'Sent']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    expect(find.text('Received by the office'), findsOneWidget);
+    expect(find.text('Back gate'), findsOneWidget, reason: 'the note');
+    expect(find.text('ITEMS (1)'), findsOneWidget);
+    expect(find.byKey(const Key('line-l1')), findsOneWidget);
+    expect(find.byKey(const Key('cancel-request')), findsOneWidget, reason: 'in the footer');
+  });
+
+  testWidgets('a request still on the phone shows the saved-on-phone line and no cancel button', (tester) async {
+    api.view = RequestsView(entries: [
+      RequestEntry(state: SyncState.pending, draft: RequestDraft(id: 'd3', createdAt: DateTime.utc(2026, 10, 5), destination: site)),
+    ]);
+    await showDetail(tester, 'd3');
+    expect(find.text('Santos Townhouse · Main Contract'), findsOneWidget);
+    expect(find.text('Saved on this phone. It is sent as soon as there is signal.'), findsOneWidget);
+    expect(find.text('Saved on this phone · sends when there is signal'), findsOneWidget, reason: 'the status line');
+    expect(find.text('ITEMS (0)'), findsOneWidget);
+    expect(find.byKey(const Key('cancel-request')), findsNothing);
+  });
+
+  testWidgets('dragging the sheet down closes it; a request that left the list says so', (tester) async {
+    api.view = RequestsView(entries: [entry(requestDoc())]);
+    await showDetail(tester, 'r1');
+    api.view = const RequestsView(entries: []);
+    await controller.refresh();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('request-gone')), findsOneWidget);
+    expect(find.text('This request is no longer on the list.'), findsOneWidget);
+    await tester.timedDrag(find.byKey(const Key('wm-sheet-handle')), const Offset(0, 160), const Duration(milliseconds: 800));
+    await tester.pumpAndSettle();
+    expect(find.byType(RequestSheet), findsNothing);
+    expect(api.calls, isEmpty);
   });
 
   group('a refused draft back to editing', () {
@@ -197,12 +260,13 @@ void main() {
       await openRefused(tester);
       expect(api.calls, ['returnToDrafts:d5']);
       expect(find.byType(ComposeScreen), findsNothing);
-      expect(find.byType(RequestDetailScreen), findsOneWidget);
+      expect(find.byType(RequestSheet), findsOneWidget);
     });
 
     testWidgets('accepted: the draft opens in the editor', (tester) async {
       await openRefused(tester);
       expect(find.byType(ComposeScreen), findsOneWidget);
+      expect(find.byType(RequestSheet, skipOffstage: false), findsNothing, reason: 'the sheet closed before the editor opened');
     });
   });
 
@@ -216,7 +280,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('new-request')));
     await tester.pumpAndSettle();
-    await tester.pageBack();
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(api.savedDrafts, isEmpty);
     expect(find.byKey(const Key('entry-d1')), findsNothing);

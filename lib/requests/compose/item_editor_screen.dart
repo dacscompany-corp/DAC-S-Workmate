@@ -8,6 +8,9 @@ import '../../history/domain/history_models.dart';
 import '../../history/ui/find_previous_screen.dart';
 import '../../history/ui/history_thumb.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
+import '../../ui/wm_page.dart';
+import '../../ui/wm_sheet.dart';
 import '../domain/quantity.dart';
 import '../domain/request_draft.dart';
 import '../domain/request_models.dart';
@@ -33,6 +36,7 @@ class ItemEdit {
 /// missing (spec §4A: the request still goes through; the office matches it).
 class ItemEditorScreen extends StatefulWidget {
   const ItemEditorScreen({
+    this.initialSearch = '',
     super.key,
     required this.line,
     required this.isNew,
@@ -46,6 +50,9 @@ class ItemEditorScreen extends StatefulWidget {
   });
 
   final DraftLine line;
+
+  /// Typed in New request's quick-add row: starts the list search here.
+  final String initialSearch;
   final bool isNew;
   final List<CatalogItem> catalog;
 
@@ -65,7 +72,7 @@ class ItemEditorScreen extends StatefulWidget {
 
 class _ItemEditorScreenState extends State<ItemEditorScreen> {
   late DraftLine _line = _withoutLostMember(widget.line);
-  late final _search = TextEditingController();
+  late final _search = TextEditingController(text: widget.initialSearch);
   late final _description = TextEditingController(text: widget.line.description);
   late final _spec = TextEditingController(text: widget.line.spec);
   late final _unit = TextEditingController(text: widget.line.unit);
@@ -76,6 +83,15 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
   late bool _describing = !widget.line.fromCatalog && widget.line.description.isNotEmpty;
   bool _tried = false;
   bool _addingPhoto = false;
+
+  /// Where each field with a validation error sits on the page, so a failed
+  /// SAVE ITEM (pinned at the bottom) can scroll the first one into view.
+  final _topKey = GlobalKey();
+  final _nameKey = GlobalKey();
+  final _unitKey = GlobalKey();
+  final _quantityKey = GlobalKey();
+  final _reasonKey = GlobalKey();
+  final _neededByKey = GlobalKey();
 
   /// Photos taken in THIS editing session: deleted unless the item is saved.
   final _added = <String>[];
@@ -257,12 +273,41 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
 
   void _save() {
     setState(() => _tried = true);
-    if (_problems.isNotEmpty) return;
+    if (_problems.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealFirstError(0));
+      return;
+    }
     for (final p in _removed) {
       unawaited(widget.services.api.discardPhoto(p));
     }
     _saved = true;
     Navigator.of(context).pop(ItemEdit.save(_current));
+  }
+
+  /// Scrolls the first field with an error (page order) into view. The page is a
+  /// lazy list, so a field far off screen is not built yet: walk down from the
+  /// top, a screenful per frame, until it is.
+  void _revealFirstError(int attempt) {
+    if (!mounted) return;
+    final problems = _problems;
+    final key = [
+      if (_describing && problems.contains(DraftIssueKind.noDescription)) _nameKey,
+      if (_describing && problems.contains(DraftIssueKind.noUnit)) _unitKey,
+      if (problems.contains(DraftIssueKind.badQuantity)) _quantityKey,
+      if (problems.contains(DraftIssueKind.urgentNeedsReason)) _reasonKey,
+      if (problems.contains(DraftIssueKind.urgentNeedsDate)) _neededByKey,
+    ].firstOrNull;
+    if (key == null) return;
+    final target = key.currentContext;
+    if (target != null) {
+      Scrollable.ensureVisible(target, alignment: 0.2, duration: const Duration(milliseconds: 250));
+      return;
+    }
+    final anchor = _topKey.currentContext;
+    if (anchor == null || attempt > 40) return;
+    final position = Scrollable.of(anchor).position;
+    position.jumpTo(attempt == 0 ? 0 : (position.pixels + 400).clamp(0.0, position.maxScrollExtent));
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealFirstError(attempt + 1));
   }
 
   @override
@@ -274,34 +319,25 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
         .take(30)
         .toList();
     final showMember = kind == ItemKind.material && widget.team != null && widget.iLead;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isNew ? 'Add item' : 'Edit item'),
-        actions: [
-          if (!widget.isNew)
-            IconButton(
-              key: const Key('item-remove'),
-              tooltip: 'Remove item',
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _remove,
+    return WmPage(
+      title: widget.isNew ? 'Add item' : 'Edit item',
+      action: widget.isNew
+          ? null
+          : Tooltip(
+              message: 'Remove item',
+              excludeFromSemantics: true,
+              child: WmRoundButton(key: const Key('item-remove'), icon: Icons.delete_outline, label: 'Remove item', onTap: _remove),
             ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-          SegmentedButton<ItemKind>(
-            segments: [for (final k in ItemKind.values) ButtonSegment(value: k, label: Text(k.label))],
-            selected: {kind},
-            onSelectionChanged: (s) => setState(() {
-              final wasPicked = _line.fromCatalog;
-              _line = _current.withoutRef().copyWith(
-                kind: s.first,
-                catalogItemId: null,
-                memberId: s.first == ItemKind.tool ? null : _line.memberId,
-                memberName: s.first == ItemKind.tool ? null : _line.memberName,
-              );
-              if (wasPicked) _clearItemFields();
-            }),
+      footer: WmSheetButton(key: const Key('item-save'), label: 'SAVE ITEM', icon: Icons.check, onPressed: _save),
+      children: [
+          KeyedSubtree(
+            key: _topKey,
+            child: Row(children: [
+              for (final k in ItemKind.values) ...[
+                if (k != ItemKind.values.first) const SizedBox(width: 8),
+                Expanded(child: WmChoiceChip(key: Key('item-kind-${k.wire}'), label: k.label, selected: kind == k, onTap: () => _setKind(k))),
+              ],
+            ]),
           ),
           const SizedBox(height: 16),
           if (_line.fromCatalog) ...[
@@ -315,44 +351,58 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
             ),
             const SizedBox(height: 8),
             for (final c in matches)
-              ListTile(
-                key: Key('catalog-${c.id}'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text([if (c.spec.isNotEmpty) c.spec, c.unit, if (c.category.isNotEmpty) c.category].join(' · ')),
-                onTap: () => _pick(c),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  key: Key('catalog-${c.id}'),
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: WmColors.border)),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => _pick(c),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(c.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                        const SizedBox(height: 2),
+                        Text([if (c.spec.isNotEmpty) c.spec, c.unit, if (c.category.isNotEmpty) c.category].join(' · '),
+                            style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                      ]),
+                    ),
+                  ),
+                ),
               ),
             if (matches.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Nothing in the list matches.')),
-            TextButton.icon(
-              key: const Key('describe-item'),
-              onPressed: () => setState(() {
-                _describing = true;
-                if (_description.text.isEmpty) _description.text = _search.text.trim();
-              }),
-              icon: const Icon(Icons.edit_note),
-              label: const Text('Not in the list? Describe it'),
-            ),
-            if (widget.services.history case final history?)
-              TextButton.icon(
-                key: const Key('item-find-previous'),
-                onPressed: () => _findPrevious(history),
-                icon: const Icon(Icons.history),
-                label: const Text('Find previous item'),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              WmPillButton(
+                key: const Key('describe-item'),
+                icon: Icons.edit_note,
+                label: 'Not in the list? Describe it',
+                onTap: () => setState(() {
+                  _describing = true;
+                  if (_description.text.isEmpty) _description.text = _search.text.trim();
+                }),
               ),
+              if (widget.services.history case final history?)
+                WmPillButton(key: const Key('item-find-previous'), icon: Icons.history, label: 'Find previous item', onTap: () => _findPrevious(history)),
+            ]),
           ] else ...[
             const Text('Describe the item. The office will match it to the list.',
                 style: TextStyle(color: WmColors.textMuted, fontSize: 13)),
             const SizedBox(height: 10),
-            _field(_description, 'Item name', 'item-name', error: _error(DraftIssueKind.noDescription)),
+            KeyedSubtree(key: _nameKey, child: _field(_description, 'Item name', 'item-name', error: _error(DraftIssueKind.noDescription))),
             _field(_spec, 'Size / type (optional)', 'item-spec'),
-            _field(_unit, 'Unit (pc, bag, m…)', 'item-unit', error: _error(DraftIssueKind.noUnit)),
+            KeyedSubtree(key: _unitKey, child: _field(_unit, 'Unit (pc, bag, m…)', 'item-unit', error: _error(DraftIssueKind.noUnit))),
             _field(_category, 'Trade (optional, e.g. plumbing)', 'item-category'),
             if (widget.catalog.isNotEmpty)
               TextButton(onPressed: () => setState(() => _describing = false), child: const Text('Pick from the list instead')),
           ],
           const SizedBox(height: 8),
-          _field(_quantity, 'Quantity${_unit.text.trim().isEmpty ? '' : ' (${_unit.text.trim()})'}', 'item-quantity',
-              keyboard: const TextInputType.numberWithOptions(decimal: true), error: _error(DraftIssueKind.badQuantity)),
+          KeyedSubtree(
+            key: _quantityKey,
+            child: _field(_quantity, 'Quantity${_unit.text.trim().isEmpty ? '' : ' (${_unit.text.trim()})'}', 'item-quantity',
+                keyboard: const TextInputType.numberWithOptions(decimal: true), error: _error(DraftIssueKind.badQuantity)),
+          ),
           if (showMember)
             DropdownButtonFormField<String?>(
               key: const Key('item-member'),
@@ -378,8 +428,10 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
             onChanged: (v) => setState(() => _line = _current.copyWith(urgent: v)),
           ),
           if (_line.urgent) ...[
-            _field(_reason, 'Why is it urgent?', 'item-reason', error: _error(DraftIssueKind.urgentNeedsReason)),
-            ListTile(
+            KeyedSubtree(key: _reasonKey, child: _field(_reason, 'Why is it urgent?', 'item-reason', error: _error(DraftIssueKind.urgentNeedsReason))),
+            KeyedSubtree(
+              key: _neededByKey,
+              child: ListTile(
               key: const Key('item-needed-by'),
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.event),
@@ -388,6 +440,7 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
                   ? null
                   : Text(_error(DraftIssueKind.urgentNeedsDate)!, style: const TextStyle(color: WmColors.danger)),
               onTap: _pickDate,
+              ),
             ),
           ],
           _field(_notes, 'Notes (optional)', 'item-notes'),
@@ -411,18 +464,26 @@ class _ItemEditorScreenState extends State<ItemEditorScreen> {
                 ),
               ]),
             if (_line.photos.length < maxPhotosPerItem)
-              OutlinedButton.icon(
-                key: const Key('item-add-photo'),
-                onPressed: _addingPhoto ? null : _addPhoto,
-                icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Add photo'),
-              ),
+              WmPillButton(key: const Key('item-add-photo'), icon: Icons.photo_camera_outlined, label: 'Add photo', busy: _addingPhoto, onTap: _addPhoto),
           ]),
-          const SizedBox(height: 20),
-          FilledButton(key: const Key('item-save'), onPressed: _save, child: const Text('SAVE ITEM')),
-        ]),
-      ),
+      ],
     );
+  }
+
+  /// Material or Tool. Picking the kind already chosen changes nothing (the
+  /// old segmented button only fired on a change).
+  void _setKind(ItemKind k) {
+    if (k == _line.kind) return;
+    setState(() {
+      final wasPicked = _line.fromCatalog;
+      _line = _current.withoutRef().copyWith(
+        kind: k,
+        catalogItemId: null,
+        memberId: k == ItemKind.tool ? null : _line.memberId,
+        memberName: k == ItemKind.tool ? null : _line.memberName,
+      );
+      if (wasPicked) _clearItemFields();
+    });
   }
 
   String? _error(DraftIssueKind k) => _tried && _problems.contains(k) ? draftIssueText(k) : null;
