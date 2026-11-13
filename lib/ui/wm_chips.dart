@@ -188,15 +188,19 @@ class WmSegmented<T> extends StatelessWidget {
           onTap: () => onChanged(value),
           child: SizedBox(
             height: 38,
-            child: Center(
-              child: Text(label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: chosen ? FontWeight.w800 : FontWeight.w600,
-                    color: chosen ? WmColors.text : WmColors.textMuted,
-                  )),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              // A long label ("To receive (12)") shrinks to fit: a count is never cut off.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: chosen ? FontWeight.w800 : FontWeight.w600,
+                      color: chosen ? WmColors.text : WmColors.textMuted,
+                    )),
+              ),
             ),
           ),
         ),

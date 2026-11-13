@@ -20,6 +20,8 @@ import 'package:workmate/stock/ui/stock_controller.dart';
 import 'package:workmate/stock/ui/stock_copy.dart';
 import 'package:workmate/stock/ui/stock_screen.dart';
 import 'package:workmate/ui/theme.dart';
+import 'package:workmate/ui/wm_chips.dart';
+import 'package:workmate/ui/wm_sheet.dart';
 
 import '../attendance/fakes.dart' show useTallPhone;
 import '../purchasing/purchasing_api_fake.dart';
@@ -132,7 +134,7 @@ void main() {
       await tester.tap(find.text('Stock').last);
       await tester.pumpAndSettle();
       expect(find.text('Cement · Portland'), findsOneWidget);
-      expect(find.text('14 bag in all'), findsOneWidget);
+      expect(find.text('14 bag'), findsOneWidget);
       expect(find.text('10 bag'), findsOneWidget);
       expect(find.text('4 bag'), findsOneWidget);
       expect(find.byKey(const Key('record-unplanned')), findsNothing, reason: 'Record purchase stays on the buying tabs');
@@ -481,6 +483,198 @@ void main() {
       expect(params['p_qty'], '3');
       expect(params['p_where'], 'warehouse');
       expect(recorded, 1);
+    });
+  });
+
+  group('Stock tab layout and the Received sheet (Phase 6a)', () {
+    late StockController controller;
+    late StockSubmitter submitter;
+
+    Future<void> openStock(WidgetTester tester, {Size? size, double scale = 1}) async {
+      if (size == null) {
+        useTallPhone(tester);
+      } else {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+      }
+      controller = StockController(remote: stock);
+      await controller.refresh();
+      submitter = StockSubmitter(remote: stock, store: MemoryStockPendingStore(), now: () => DateTime.utc(2026, 10, 27, 2));
+      await submitter.load('s1');
+      await tester.pumpWidget(MaterialApp(
+        theme: workMateTheme(),
+        builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)), child: child!),
+        home: Scaffold(body: StockScreen(controller: controller, submitter: submitter)),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> openReceive(WidgetTester tester, {String key = 'receive-p-1:1'}) async {
+      await tester.tap(find.byKey(const Key('stock-part-receive')));
+      await tester.pumpAndSettle();
+      await press(tester, key);
+    }
+
+    String qtyField(WidgetTester tester) => tester.widget<TextField>(find.byKey(const Key('receive-qty'))).controller!.text;
+
+    testWidgets('the switch is a WmSegmented: the count on To receive, and each segment key changes the part', (tester) async {
+      await openStock(tester);
+      expect(find.byType(SegmentedButton<StockPart>), findsNothing);
+      expect(tester.widget(find.byKey(const Key('stock-parts'))), isA<WmSegmented<StockPart>>());
+      expect(find.text('To receive (2)'), findsOneWidget);
+      expect(find.byKey(const Key('stock-item-item-cement')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('stock-part-receive')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('awaiting-p-1:1')), findsOneWidget);
+      expect(find.byKey(const Key('stock-item-item-cement')), findsNothing);
+      await tester.tap(find.byKey(const Key('stock-part-recent')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-r-issue')), findsOneWidget);
+      expect(find.byKey(const Key('awaiting-p-1:1')), findsNothing);
+      await tester.tap(find.byKey(const Key('stock-part-stock')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('stock-item-item-cement')), findsOneWidget);
+    });
+
+    testWidgets('an item card shows its total on the right and one row per place; the words "in all" are gone', (tester) async {
+      await openStock(tester);
+      final card = find.byKey(const Key('stock-item-item-cement'));
+      final name = tester.getRect(find.descendant(of: card, matching: find.text('Cement · Portland')));
+      final total = tester.getRect(find.descendant(of: card, matching: find.text('14 bag')));
+      expect(total.left, greaterThan(name.right), reason: 'the total sits at the right of the name');
+      expect(total.center.dy, closeTo(name.center.dy, 12));
+      expect(find.textContaining('in all'), findsNothing);
+      expect(find.descendant(of: card, matching: find.text('Warehouse')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('10 bag')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Barlin Residence')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('4 bag')), findsOneWidget);
+      expect(find.byIcon(Icons.warehouse_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.construction_outlined), findsOneWidget);
+    });
+
+    testWidgets('no peso on any of the three parts, nor in the Received sheet', (tester) async {
+      await openStock(tester);
+      expectNoPesos();
+      await tester.tap(find.byKey(const Key('stock-part-receive')));
+      await tester.pumpAndSettle();
+      expectNoPesos();
+      await tester.tap(find.byKey(const Key('stock-part-recent')));
+      await tester.pumpAndSettle();
+      expectNoPesos();
+      expect(find.text('Cost assignment pending'), findsOneWidget, reason: 'a cost move shows only its state');
+      await tester.tap(find.byKey(const Key('stock-part-receive')));
+      await tester.pumpAndSettle();
+      await press(tester, 'receive-p-1:1');
+      expectNoPesos();
+    });
+
+    testWidgets('Received: + adds 1, - takes 1 and stops at 0, a typed 2.5 becomes 3.5', (tester) async {
+      await openStock(tester);
+      await openReceive(tester);
+      expect(qtyField(tester), '8');
+      await press(tester, 'receive-plus');
+      expect(qtyField(tester), '9');
+      await press(tester, 'receive-minus');
+      await press(tester, 'receive-minus');
+      expect(qtyField(tester), '7');
+      await tester.enterText(find.byKey(const Key('receive-qty')), '1');
+      await press(tester, 'receive-minus');
+      expect(qtyField(tester), '0');
+      await press(tester, 'receive-minus');
+      expect(qtyField(tester), '0', reason: 'never below zero');
+      await tester.enterText(find.byKey(const Key('receive-qty')), '2.5');
+      await press(tester, 'receive-plus');
+      expect(qtyField(tester), '3.5');
+      await press(tester, 'receive-minus');
+      expect(qtyField(tester), '2.5');
+      await tester.enterText(find.byKey(const Key('receive-qty')), '0.5');
+      await press(tester, 'receive-minus');
+      expect(qtyField(tester), '0', reason: 'a part of one stops at zero');
+      await tester.enterText(find.byKey(const Key('receive-qty')), '');
+      await press(tester, 'receive-plus');
+      expect(qtyField(tester), '1', reason: 'an empty box counts as 0');
+      await tester.enterText(find.byKey(const Key('receive-qty')), 'abc');
+      await press(tester, 'receive-plus');
+      expect(qtyField(tester), '1', reason: 'an unreadable box counts as 0');
+      expect(tester.getSize(find.byKey(const Key('receive-minus'))).width, 52);
+      expect(tester.getSize(find.byKey(const Key('receive-plus'))).height, 52);
+      expect(tester.getRect(find.byKey(const Key('receive-minus'))).right, lessThan(tester.getRect(find.byKey(const Key('receive-qty'))).left + 1));
+      expect(tester.getRect(find.byKey(const Key('receive-plus'))).left, greaterThan(tester.getRect(find.byKey(const Key('receive-qty'))).right - 1));
+    });
+
+    testWidgets("Received: Send sits in the sheet footer and records exactly today's parameters", (tester) async {
+      await openStock(tester);
+      await openReceive(tester);
+      expect(find.ancestor(of: find.byKey(const Key('receive-send')), matching: find.byType(WmSheetFrame)), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.descendant(of: find.byType(WmSheetFrame), matching: find.byType(ListView)), matching: find.byKey(const Key('receive-send'))),
+          findsNothing,
+          reason: 'pinned in the footer, not in the scrolling body');
+      await press(tester, 'receive-minus');
+      await tester.enterText(find.byKey(const Key('receive-note')), '  on the truck ');
+      await press(tester, 'receive-send');
+      final (fn, params, _) = stock.writes.single;
+      expect(fn, 'stk_receive');
+      expect(params.keys.toSet(), {'p_op', 'p_purchase', 'p_line_no', 'p_qty', 'p_on', 'p_note'});
+      expect(params['p_purchase'], 'p-1');
+      expect(params['p_line_no'], 1);
+      expect(params['p_qty'], '7');
+      expect(params['p_note'], 'on the truck');
+      expect(find.byKey(const Key('receive-qty')), findsNothing, reason: 'the sheet closed');
+      expect(find.byKey(const Key('stock-recorded')), findsOneWidget, reason: 'the notice stays a SnackBar on the tab');
+    });
+
+    testWidgets('Received: more than awaited is refused above Send in the footer and nothing is sent', (tester) async {
+      await openStock(tester);
+      await openReceive(tester);
+      await press(tester, 'receive-plus');
+      await press(tester, 'receive-plus');
+      await press(tester, 'receive-send');
+      expect(stock.writes, isEmpty);
+      expect(find.byKey(const Key('stock-failure')), findsOneWidget);
+      expect(find.text(stockFailureCopy(StockFailure.moreThanAwaited).english), findsOneWidget);
+    });
+
+    testWidgets('Received, answer lost: no Send, the unresolved box in the body, the fields and buttons locked', (tester) async {
+      await openStock(tester);
+      await openReceive(tester);
+      stock.failNextWrite = const SocketException('lost');
+      await press(tester, 'receive-send');
+      final op = stock.attempts.single.$1;
+      expect(find.byKey(const Key('receive-send')), findsNothing);
+      // The tab behind the sheet lists the same unresolved record; the sheet's own box is the one in its body.
+      expect(
+          find.descendant(
+              of: find.descendant(of: find.byType(WmSheetFrame), matching: find.byType(ListView)), matching: find.byKey(Key('unsure-$op'))),
+          findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('receive-qty'))).enabled, isFalse);
+      final before = qtyField(tester);
+      await tester.ensureVisible(find.byKey(const Key('receive-plus')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('receive-plus')), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(qtyField(tester), before, reason: 'locked: + does nothing');
+    });
+
+    for (final part in ['stock-part-stock', 'stock-part-receive', 'stock-part-recent']) {
+      testWidgets('320 x 568 at text scale 1.3 raises no exception ($part)', (tester) async {
+        await openStock(tester, size: const Size(320, 568), scale: 1.3);
+        await tester.tap(find.byKey(Key(part)));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('stock-parts')), findsOneWidget);
+      });
+    }
+
+    testWidgets('320 x 568 at text scale 1.3: the Received sheet raises no exception', (tester) async {
+      await openStock(tester, size: const Size(320, 568), scale: 1.3);
+      await tester.tap(find.byKey(const Key('stock-part-receive')));
+      await tester.pumpAndSettle();
+      await press(tester, 'receive-p-1:1');
+      expect(find.byKey(const Key('receive-send')), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 

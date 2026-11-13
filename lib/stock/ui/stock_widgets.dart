@@ -6,6 +6,7 @@ import '../../attendance/ui/formats.dart' show clockTime;
 import '../../purchasing/ui/purchasing_copy.dart' show BilingualText, bilingualButton;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart' show WmSheetButton;
 import '../data/stock_submitter.dart';
 import '../domain/stock_failure.dart';
 import '../domain/stock_submission.dart';
@@ -113,6 +114,50 @@ mixin StockSending<T extends StatefulWidget> on State<T> {
         ),
       const SizedBox(height: 12),
       sending ? const LinearProgressIndicator() : bilingualButton(sendLabel, onSend, filled: true, key: sendKey),
+    ]);
+  }
+
+  /// The unresolved box, once locked (a sheet's body shows it in place of Send).
+  /// Same behaviour as [sendArea]'s box; for sheets with a pinned footer.
+  Widget? sendBox() {
+    final op = unsureOp;
+    if (op == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: UnresolvedBox(
+        submitter: submitter,
+        opId: op,
+        firstFailure: _unsureWhy,
+        inForm: true,
+        onRecorded: () {
+          if (mounted) Navigator.of(context).pop(true);
+        },
+        onSettledNotRecorded: (f) => setState(() {
+          unsureOp = null;
+          failure = f;
+        }),
+      ),
+    );
+  }
+
+  /// The pinned footer: the refusal or finish-first notice above the Send
+  /// button (two languages). Null once locked, when [sendBox] is shown instead.
+  Widget? sendFooter({required Key sendKey, required VoidCallback onSend}) {
+    if (locked) return null;
+    final f = failure;
+    final m = message;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (f != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: FailureNotice(key: const Key('stock-failure'), english: stockFailureCopy(f).english, tagalog: stockFailureCopy(f).tagalog),
+        ),
+      if (m != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: FailureNotice(key: const Key('stock-blocked'), english: m.english, tagalog: m.tagalog),
+        ),
+      WmSheetButton(key: sendKey, label: sendLabel.english, tagalog: sendLabel.tagalog, icon: Icons.send, onPressed: onSend, busy: sending),
     ]);
   }
 }

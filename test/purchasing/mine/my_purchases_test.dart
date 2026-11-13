@@ -82,6 +82,136 @@ void main() {
     expect(shown!.id, 'pu1');
   });
 
+  group('the row cards (Phase 6a)', () {
+    late PurchasingServices services;
+    MyPurchase? shown;
+    PurchaseDraft? opened;
+
+    MyPurchase paid() => MyPurchase.fromJson(const {
+          'id': 'pu7', 'status': 'recorded', 'supplier': 'ZZ Hardware', 'supplier_id': 's1', 'receipt_total': 1250.5, 'purchase_date': '2026-10-20',
+          'projects': ['Barlin Residence'], 'unit_check': true,
+          'pay': {'state': 'partial', 'tracked': true, 'due': 1250.5, 'paid': 250.5, 'balance': 1000},
+        });
+
+    Future<void> pump(WidgetTester tester, {bool withServices = true, Size? size, double scale = 1}) async {
+      shown = null;
+      opened = null;
+      services = PurchasingServices(api: api, takePhoto: (_) async => 'shot.jpg', pickPhoto: (_) async => 'gallery.jpg');
+      if (size != null) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+      } else {
+        useTallPhone(tester);
+      }
+      await c.refresh();
+      await tester.pumpWidget(MaterialApp(
+        theme: workMateTheme(),
+        builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)), child: child!),
+        home: Scaffold(
+          body: MyPurchasesScreen(
+              controller: c, onOpenDraft: (d) => opened = d, onOpenPurchase: (p) => shown = p, services: withServices ? services : null),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('a recorded row: supplier, date line, total, flags, pay line, a chevron; the card opens the purchase', (tester) async {
+      api.mine = MyPurchasesView(purchases: [paid()], fetchedAt: wednesday);
+      await pump(tester);
+      final card = find.byKey(const Key('purchase-pu7'));
+      expect(find.descendant(of: card, matching: find.text('ZZ Hardware')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('2026-10-20 · Barlin Residence')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('₱1,250.50')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Needs office check')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.byKey(const Key('pay-line-pu7'))), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.byKey(const Key('pay-pu7'))), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.byIcon(Icons.chevron_right)), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('₱1,000.00 left')), findsOneWidget);
+      await tester.tap(find.descendant(of: card, matching: find.text('ZZ Hardware')));
+      expect(shown!.id, 'pu7');
+    });
+
+    testWidgets('Record payment does not also open the purchase', (tester) async {
+      api.mine = MyPurchasesView(purchases: [paid()], fetchedAt: wednesday);
+      await pump(tester);
+      await tester.ensureVisible(find.byKey(const Key('pay-pu7')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pay-pu7')));
+      await tester.pumpAndSettle();
+      expect(shown, isNull);
+    });
+
+    testWidgets('a needs-attention purchase keeps Fix and Throw away and both languages of its reason', (tester) async {
+      await pump(tester);
+      final card = find.byKey(const Key('queued-q2'));
+      expect(find.descendant(of: card, matching: find.byKey(const Key('fix-q2'))), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.byKey(const Key('throw-q2'))), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text(purFailureCopy(PurFailure.lineClosed).english)), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text(purFailureCopy(PurFailure.lineClosed).tagalog)), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Needs attention')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('Kailangang ayusin')), findsOneWidget);
+    });
+
+    testWidgets('a draft row opens the draft and keeps its delete button, which does not open it', (tester) async {
+      await pump(tester);
+      final card = find.byKey(const Key('draft-d1'));
+      expect(find.descendant(of: card, matching: find.text('Purchase on 2026-10-21')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.text('0 items · not sent')), findsOneWidget);
+      expect(find.descendant(of: card, matching: find.byKey(const Key('delete-draft-d1'))), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('delete-draft-d1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('delete-draft-d1')));
+      await tester.pumpAndSettle();
+      expect(opened, isNull);
+      expect(api.calls, contains('deleteDraft:d1'));
+    });
+
+    testWidgets('a draft row opens the draft when tapped', (tester) async {
+      await pump(tester);
+      await tester.ensureVisible(find.byKey(const Key('draft-d1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byKey(const Key('draft-d1')), matching: find.text('Purchase on 2026-10-21')));
+      expect(opened!.id, 'd1');
+    });
+
+    testWidgets('the group labels show only for a group with rows; Recorded always', (tester) async {
+      api.mine = const MyPurchasesView(fetchedAt: null);
+      api.draftList = const [];
+      await pump(tester);
+      expect(find.text('NOT SENT YET'), findsNothing);
+      expect(find.text('DRAFTS'), findsNothing);
+      expect(find.text('RECORDED'), findsOneWidget);
+      expect(find.text(' · Naitala na'), findsOneWidget);
+    });
+
+    testWidgets('all three group labels show when each group has rows', (tester) async {
+      await pump(tester);
+      expect(find.text('NOT SENT YET'), findsOneWidget);
+      expect(find.text('DRAFTS'), findsOneWidget);
+      expect(find.text('RECORDED'), findsOneWidget);
+    });
+
+    testWidgets('320 x 568 with large text raises no exception, a long supplier keeps the amount in place', (tester) async {
+      api.mine = MyPurchasesView(
+        queued: [QueuedPurchase(draft: draft('q9', supplier: 'A Very Long Supplier Name Trading and Construction Supplies Incorporated'), state: QueuedState.waiting)],
+        purchases: [
+          MyPurchase.fromJson(const {
+            'id': 'pu8', 'status': 'recorded', 'supplier': 'A Very Long Supplier Name Trading and Construction Supplies Incorporated',
+            'supplier_id': 's1', 'receipt_total': 1234567.89, 'purchase_date': '2026-10-20', 'projects': ['Barlin Residence', 'Another Long Project Name'],
+            'pending_change': true, 'unit_check': true, 'no_receipt_reason': 'x', 'unplanned': true, 'extra': true,
+            'pay': {'state': 'partial', 'tracked': true, 'due': 1234567.89, 'paid': 250.5, 'balance': 1234317.39},
+          }),
+        ],
+        fetchedAt: wednesday,
+      );
+      await pump(tester, size: const Size(320, 568), scale: 1.3);
+      await tester.scrollUntilVisible(find.byKey(const Key('purchase-pu8')), 200);
+      expect(tester.takeException(), isNull);
+      expect(find.text('₱1,234,567.89'), findsWidgets);
+    });
+  });
+
   group('one purchase', () {
     late PurchasingServices services;
     setUp(() {

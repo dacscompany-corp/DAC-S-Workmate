@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../purchasing/ui/purchasing_copy.dart' show BilingualText, bilingualButton;
+import '../../attendance/ui/attendance_copy.dart' show Bilingual;
+import '../../purchasing/ui/purchasing_copy.dart' show BilingualText;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/stock_submitter.dart';
 import '../domain/stock_failure.dart';
 import '../domain/stock_models.dart';
@@ -67,10 +70,8 @@ class _StockScreenState extends State<StockScreen> {
       .push<bool>(MaterialPageRoute(builder: (_) => LeftoverScreen(remote: _c.remote, submitter: _s)))
       .then((v) => v == true));
 
-  void _receive(StockLine line) => _after(showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        showDragHandle: true,
+  void _receive(StockLine line) => _after(showWmSheet<bool>(
+        context,
         builder: (_) => ReceiveSheet(submitter: _s, line: line),
       ).then((v) => v == true));
 
@@ -95,20 +96,19 @@ class _StockScreenState extends State<StockScreen> {
           final ov = _c.overview;
           return RefreshIndicator(
             onRefresh: _c.refresh,
-            child: ListView(padding: const EdgeInsets.all(16), children: [
-              const Text('Stock', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 23)),
+            child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 28), children: [
+              const Text('Stock', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 26)),
               Text(stockTitle.tagalog, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
-              const SizedBox(height: 12),
-              SegmentedButton<StockPart>(
+              const SizedBox(height: 14),
+              WmSegmented<StockPart>(
                 key: const Key('stock-parts'),
-                showSelectedIcon: false,
                 segments: [
-                  const ButtonSegment(value: StockPart.stock, label: Text('Stock')),
-                  ButtonSegment(value: StockPart.receive, label: Text('To receive (${ov.awaiting.length})')),
-                  const ButtonSegment(value: StockPart.recent, label: Text('Recent')),
+                  (StockPart.stock, 'Stock', const Key('stock-part-stock')),
+                  (StockPart.receive, 'To receive (${ov.awaiting.length})', const Key('stock-part-receive')),
+                  (StockPart.recent, 'Recent', const Key('stock-part-recent')),
                 ],
-                selected: {_part},
-                onSelectionChanged: (s) => setState(() => _part = s.first),
+                selected: _part,
+                onChanged: (p) => setState(() => _part = p),
               ),
               if (_c.failure != null) ...[
                 const SizedBox(height: 10),
@@ -144,11 +144,11 @@ class _StockScreenState extends State<StockScreen> {
               ],
               if (_c.loading && !_c.loaded) const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
               if (can && _part == StockPart.stock) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Row(children: [
-                  Expanded(child: bilingualButton(issueMoveLabel, _issue, filled: true, key: const Key('stock-issue'))),
+                  Expanded(child: _ActionButton(issueMoveLabel, _issue, filled: true, key: const Key('stock-issue'))),
                   const SizedBox(width: 8),
-                  Expanded(child: bilingualButton(leftoversLabel, _leftovers, key: const Key('stock-leftovers'))),
+                  Expanded(child: _ActionButton(leftoversLabel, _leftovers, key: const Key('stock-leftovers'))),
                 ]),
               ],
               ...switch (_part) {
@@ -175,17 +175,23 @@ class _StockScreenState extends State<StockScreen> {
         _Card(
           key: Key('stock-item-${i.itemId}'),
           children: [
-            Text(i.spec.trim().isEmpty ? i.name : '${i.name} · ${i.spec}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            Text('${stockQty(i.total, i.unit)} in all', style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
-            const SizedBox(height: 6),
+            Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+              Expanded(
+                child: Text(i.spec.trim().isEmpty ? i.name : '${i.name} · ${i.spec}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              ),
+              const SizedBox(width: 8),
+              Text(stockQty(i.total, i.unit), style: _mono(15)),
+            ]),
+            const SizedBox(height: 2),
             for (final p in i.places)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: 6),
                 child: Row(children: [
-                  Icon(p.isWarehouse ? Icons.warehouse_outlined : Icons.construction_outlined, size: 16, color: WmColors.textMuted),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text(p.name)),
-                  Text(stockQty(p.quantity, i.unit), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Icon(p.isWarehouse ? Icons.warehouse_outlined : Icons.construction_outlined, size: 17, color: WmColors.textMuted),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(p.name, style: const TextStyle(fontSize: 14, color: WmColors.textSecondary))),
+                  const SizedBox(width: 8),
+                  Text(stockQty(p.quantity, i.unit), style: _mono(14)),
                 ]),
               ),
           ],
@@ -201,15 +207,19 @@ class _StockScreenState extends State<StockScreen> {
           key: Key('awaiting-${l.key}'),
           children: [
             Text(l.itemName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            const SizedBox(height: 2),
             Text('Bought ${l.purchaseDate} by ${l.boughtByName} · ${stockQty(l.quantity, l.unit)}',
                 style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text('Received ${stockQty(l.received, l.unit)} · still awaited ${stockQty(l.awaiting, l.unit)}',
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-            if (l.match == null) const Text('Not matched yet', style: TextStyle(fontSize: 12.5, color: WmColors.brownDeep)),
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            if (l.match == null) ...[
+              const SizedBox(height: 2),
+              const Text('Not matched yet', style: TextStyle(fontSize: 12.5, color: WmColors.brownDeep)),
+            ],
             if (can) ...[
-              const SizedBox(height: 8),
-              bilingualButton(receivedLabel, () => _receive(l), key: Key('receive-${l.key}')),
+              const SizedBox(height: 10),
+              SizedBox(width: double.infinity, child: _ActionButton(receivedLabel, () => _receive(l), height: 50, key: Key('receive-${l.key}'))),
             ],
           ],
         ),
@@ -227,7 +237,7 @@ class _StockScreenState extends State<StockScreen> {
               Expanded(child: Text(recordKind(r), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
               Text(r.on, style: const TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
             ]),
-            Text(recordLine(r)),
+            Padding(padding: const EdgeInsets.only(top: 4), child: Text(recordLine(r), style: const TextStyle(fontSize: 14))),
             if (r.requestDescription.isNotEmpty)
               Text('For: ${r.requestDescription}', style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
             if (r.unplannedReason.isNotEmpty)
@@ -238,7 +248,7 @@ class _StockScreenState extends State<StockScreen> {
             for (final c in r.costs) Text(costState(c), style: const TextStyle(fontSize: 12.5, color: WmColors.textSecondary)),
             if (can && r.canReturn) ...[
               const SizedBox(height: 8),
-              bilingualButton(returnLabel, () => _return(r), key: Key('return-${r.id}')),
+              _ActionButton(returnLabel, () => _return(r), height: 44, key: Key('return-${r.id}')),
             ],
           ],
         ),
@@ -246,18 +256,60 @@ class _StockScreenState extends State<StockScreen> {
   }
 }
 
+TextStyle _mono(double size) => TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700, fontSize: size);
+
+/// One card: white, 1-px border, radius 16, padding 14, 10 px from the next.
 class _Card extends StatelessWidget {
   const _Card({super.key, required this.children});
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(top: 10),
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: WmColors.border)),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: WmColors.border),
         ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
       );
+}
+
+/// A two-language button, radius 14: filled green (Issue / move) or white with
+/// an outline (the rest). [height] is its minimum height.
+class _ActionButton extends StatelessWidget {
+  const _ActionButton(this.label, this.onPressed, {super.key, this.filled = false, this.height = 54});
+  final Bilingual label;
+  final VoidCallback onPressed;
+  final bool filled;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
+    const pad = EdgeInsets.symmetric(horizontal: 12, vertical: 4);
+    final child = Column(mainAxisSize: MainAxisSize.min, children: [
+      Text(label.english, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.15)),
+      Text(label.tagalog,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400, height: 1.15, color: filled ? const Color(0xBFFFFFFF) : WmColors.textMuted)),
+    ]);
+    return filled
+        ? FilledButton(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+                minimumSize: Size(0, height), padding: pad, backgroundColor: WmColors.green, foregroundColor: Colors.white, shape: shape),
+            child: child)
+        : OutlinedButton(
+            onPressed: onPressed,
+            style: OutlinedButton.styleFrom(
+                minimumSize: Size(0, height),
+                padding: pad,
+                backgroundColor: Colors.white,
+                foregroundColor: WmColors.green,
+                side: BorderSide(color: height == 54 ? WmColors.border : WmColors.green),
+                shape: shape),
+            child: child);
+  }
 }

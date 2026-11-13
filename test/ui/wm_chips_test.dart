@@ -127,4 +127,27 @@ void main() {
     await tester.tap(find.byKey(const Key('seg-c')));
     expect(taps, ['c']);
   });
+
+  testWidgets('WmSegmented: a long label shrinks to fit, its count never cut off', (tester) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+            data: const MediaQueryData(size: Size(320, 568), textScaler: TextScaler.linear(1.3)),
+            child: Scaffold(
+                body: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: WmSegmented<int>(
+                        segments: const [(0, 'Stock', null), (1, 'To receive (12)', Key('seg')), (2, 'Recent', null)],
+                        selected: 0,
+                        onChanged: (_) {}))))));
+    expect(tester.takeException(), isNull);
+    final text = tester.widget<Text>(find.text('To receive (12)'));
+    expect(text.overflow, isNot(TextOverflow.ellipsis));
+    final label = tester.getRect(find.text('To receive (12)'));
+    final segment = tester.getRect(find.byKey(const Key('seg')));
+    expect(label.left, greaterThanOrEqualTo(segment.left));
+    expect(label.right, lessThanOrEqualTo(segment.right), reason: 'the whole label is inside its segment');
+  });
 }

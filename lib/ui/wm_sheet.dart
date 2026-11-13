@@ -150,9 +150,12 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
             ),
             if (footer != null)
               Container(
-                padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + safeBottom),
+                // A tall footer (a refusal over the button, large text) scrolls in
+                // its share of the room above the keyboard.
+                constraints: BoxConstraints(
+                    maxHeight: (MediaQuery.sizeOf(context).height - MediaQuery.viewInsetsOf(context).bottom) * .45),
                 decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: WmColors.border))),
-                child: footer,
+                child: SingleChildScrollView(padding: EdgeInsets.fromLTRB(20, 12, 20, 16 + safeBottom), child: footer),
               ),
           ],
         ),

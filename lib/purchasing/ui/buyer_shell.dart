@@ -9,6 +9,7 @@ import '../../stock/data/stock_submitter.dart';
 import '../../stock/ui/move_screen.dart';
 import '../../stock/ui/stock_controller.dart';
 import '../../stock/ui/stock_screen.dart';
+import '../../ui/theme.dart';
 import '../../ui/wm_nav_bar.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
@@ -239,8 +240,16 @@ class _BuyerShellState extends State<BuyerShell> with WidgetsBindingObserver {
                   : FloatingActionButton.extended(
                       key: const Key('record-unplanned'),
                       onPressed: () => _record(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Record purchase'),
+                      backgroundColor: WmColors.green,
+                      foregroundColor: Colors.white,
+                      elevation: 6,
+                      focusElevation: 6,
+                      hoverElevation: 6,
+                      highlightElevation: 8,
+                      extendedPadding: const EdgeInsets.fromLTRB(16, 0, 20, 0),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      icon: const Icon(Icons.add, size: 24),
+                      label: const Text('Record purchase', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
                     ),
             ),
       bottomNavigationBar: WmNavBar(

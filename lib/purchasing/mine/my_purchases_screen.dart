@@ -67,8 +67,9 @@ class MyPurchasesScreen extends StatelessWidget {
           final v = c.view;
           return RefreshIndicator(
             onRefresh: c.refresh,
-            child: ListView(padding: const EdgeInsets.all(16), children: [
-              const Text('My purchases', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 23)),
+            // Room under the last card for the shell's floating Record purchase button.
+            child: ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 110), children: [
+              const Text('My purchases', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 26)),
               const Text('Mga binili ko · last 60 days', style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
               if (c.notice != null) ...[
                 const SizedBox(height: 10),
@@ -84,8 +85,7 @@ class MyPurchasesScreen extends StatelessWidget {
               ],
               if (services != null) ...[const SizedBox(height: 10), MyCashCard(view: c.cash, onOpen: () => _openCash(context))],
               if (v.queued.isNotEmpty || v.queuedPayments.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const BilingualText(Bilingual('Not sent yet', 'Hindi pa naipapadala'), style: monoLabel),
+                const _GroupLabel(Bilingual('Not sent yet', 'Hindi pa naipapadala')),
                 for (final q in v.queued) _QueuedCard(q: q, onFix: () => _fix(q), onThrowAway: () => c.throwAway(q)),
                 for (final q in v.queuedPayments)
                   _QueuedPaymentCard(
@@ -95,52 +95,132 @@ class MyPurchasesScreen extends StatelessWidget {
                   ),
               ],
               if (c.drafts.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const BilingualText(Bilingual('Drafts', 'Mga draft'), style: monoLabel),
+                const _GroupLabel(Bilingual('Drafts', 'Mga draft')),
                 for (final d in c.drafts)
-                  Card(
+                  _RowCard(
                     key: Key('draft-${d.id}'),
-                    color: Colors.white,
-                    child: ListTile(
-                      title: Text(d.supplierName.isEmpty ? 'Purchase on ${d.purchaseDate}' : d.supplierName),
-                      subtitle: Text('${d.lines.length} item${d.lines.length == 1 ? '' : 's'} · not sent'),
-                      onTap: () => onOpenDraft(d),
-                      trailing: IconButton(key: Key('delete-draft-${d.id}'), icon: const Icon(Icons.delete_outline), onPressed: () => c.deleteDraft(d)),
-                    ),
+                    title: d.supplierName.isEmpty ? 'Purchase on ${d.purchaseDate}' : d.supplierName,
+                    sub: '${d.lines.length} item${d.lines.length == 1 ? '' : 's'} · not sent',
+                    onTap: () => onOpenDraft(d),
+                    action: IconButton(key: Key('delete-draft-${d.id}'), icon: const Icon(Icons.delete_outline), onPressed: () => c.deleteDraft(d)),
                   ),
               ],
-              const SizedBox(height: 16),
-              const BilingualText(Bilingual('Recorded', 'Naitala na'), style: monoLabel),
+              const _GroupLabel(Bilingual('Recorded', 'Naitala na')),
               if (!c.loading && v.purchases.isEmpty)
                 const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Text('No purchases in the last 60 days.')),
               for (final p in v.purchases)
-                Card(
+                _RowCard(
                   key: Key('purchase-${p.id}'),
-                  color: Colors.white,
-                  child: InkWell(
-                    onTap: () => onOpenPurchase(p),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Row(children: [
-                          Expanded(child: Text(p.supplier.isEmpty ? 'No supplier' : p.supplier, style: const TextStyle(fontWeight: FontWeight.w800))),
-                          Text(peso(p.receiptTotal), style: const TextStyle(fontWeight: FontWeight.w800)),
-                        ]),
-                        Text('${p.purchaseDate} · ${[...p.projects, if (p.warehouse) 'Warehouse'].join(', ')}',
-                            style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
-                        const SizedBox(height: 6),
-                        Wrap(spacing: 6, runSpacing: 6, children: [for (final f in purchaseFlags(p)) _Flag(f)]),
-                        // F1 (0.8.1): a voided purchase with nothing paid already says
-                        // "Voided"; only "Voided — paid, to recover" adds anything.
-                        if ((p.pay.tracked || p.pay.state != 'not_tracked') && p.pay.state != 'void') _PayLine(p: p, unsent: v.unsentFor(p.id), anySent: v.sentFor(p.id), onPay: services == null ? null : () => _pay(context, p)),
-                      ]),
-                    ),
-                  ),
+                  title: p.supplier.isEmpty ? 'No supplier' : p.supplier,
+                  sub: '${p.purchaseDate} · ${[...p.projects, if (p.warehouse) 'Warehouse'].join(', ')}',
+                  value: peso(p.receiptTotal),
+                  onTap: () => onOpenPurchase(p),
+                  below: [
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 6, runSpacing: 6, children: [for (final f in purchaseFlags(p)) _Flag(f)]),
+                    // F1 (0.8.1): a voided purchase with nothing paid already says
+                    // "Voided"; only "Voided — paid, to recover" adds anything.
+                    if ((p.pay.tracked || p.pay.state != 'not_tracked') && p.pay.state != 'void')
+                      _PayLine(p: p, unsent: v.unsentFor(p.id), anySent: v.sentFor(p.id), onPay: services == null ? null : () => _pay(context, p)),
+                  ],
                 ),
-              const SizedBox(height: 80),
             ]),
           );
         },
+      );
+}
+
+/// A group's label: the English in capitals, then ` · Tagalog` (as on the shopping list).
+class _GroupLabel extends StatelessWidget {
+  const _GroupLabel(this.title);
+  final Bilingual title;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 20),
+        child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Text(title.english.toUpperCase(), style: monoLabel),
+          Text(' · ${title.tagalog}', style: monoLabel.copyWith(fontWeight: FontWeight.w400, letterSpacing: 0)),
+        ]),
+      );
+}
+
+/// The mockup's row card, used by all three groups: a title and a muted line on
+/// the left, the amount (mono, bold) on the right, then an optional action and a
+/// chevron when the card opens something; [below] holds flags, the pay line or
+/// the reason and its buttons. The whole card is the tap target when [onTap] is
+/// given; buttons inside it win the tap, so they never also open the card.
+class _RowCard extends StatelessWidget {
+  const _RowCard({super.key, required this.title, this.sub, this.value, this.onTap, this.action, this.tint, this.border, this.below = const []});
+  final String title;
+  final String? sub;
+  final String? value;
+  final VoidCallback? onTap;
+  final Widget? action;
+  final Color? tint;
+  final Color? border;
+  final List<Widget> below;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Expanded(
+            flex: 3,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              if (sub != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(sub!, style: const TextStyle(fontSize: 13, color: WmColors.textMuted))),
+            ]),
+          ),
+          if (value != null) ...[
+            const SizedBox(width: 10),
+            // The name wraps; the amount keeps its place (it shrinks only when it truly cannot fit).
+            Flexible(
+              flex: 2,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(value!, style: const TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700, fontSize: 15)),
+              ),
+            ),
+          ],
+          if (action != null) ...[const SizedBox(width: 4), action!],
+          if (onTap != null) ...[const SizedBox(width: 4), const Icon(Icons.chevron_right, size: 22, color: WmColors.textMuted)],
+        ]),
+        ...below,
+      ]),
+    );
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(color: tint ?? Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: border ?? WmColors.border)),
+      child: Material(
+        type: MaterialType.transparency,
+        child: onTap == null ? body : InkWell(borderRadius: BorderRadius.circular(16), onTap: onTap, child: body),
+      ),
+    );
+  }
+}
+
+/// A status as a pill, its Tagalog beside it.
+class _StatusPill extends StatelessWidget {
+  const _StatusPill(this.label, {required this.color, required this.tint});
+  final Bilingual label;
+  final Color color;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(999)),
+            child: Text(label.english, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: color)),
+          ),
+          Text(label.tagalog, style: const TextStyle(fontSize: 11.5, color: WmColors.textMuted)),
+        ]),
       );
 }
 
@@ -150,9 +230,9 @@ class _Flag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-        decoration: BoxDecoration(color: flag.$3, borderRadius: BorderRadius.circular(20)),
-        child: Text(flag.$1, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: flag.$2)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(color: flag.$3, borderRadius: BorderRadius.circular(999)),
+        child: Text(flag.$1, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: flag.$2)),
       );
 }
 
@@ -202,27 +282,23 @@ class _QueuedPaymentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final attention = q.state == QueuedState.needsAttention;
     final why = attention ? purFailureCopy(q.failure ?? PurFailure.unexpected) : null;
-    return Card(
+    return _RowCard(
       key: Key('queued-pay-${q.opId}'),
-      color: attention ? WmColors.dangerTint : Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(child: Text('Payment${supplier.isEmpty ? '' : ' to $supplier'}', style: const TextStyle(fontWeight: FontWeight.w800))),
-            Text(peso(q.amount), style: const TextStyle(fontWeight: FontWeight.w800)),
-          ]),
-          Text(paySourceCopy(q.source).english, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
-          BilingualText(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingToSendPayLabel),
-              style: TextStyle(fontWeight: FontWeight.w700, color: attention ? WmColors.danger : WmColors.brownDeep)),
-          if (why != null) ...[
-            const SizedBox(height: 6),
-            Text(why.english, style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w600)),
-            Text(why.tagalog, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
-            TextButton(key: Key('throw-pay-${q.opId}'), onPressed: onThrowAway, child: const Text('Throw away')),
-          ],
-        ]),
-      ),
+      title: 'Payment${supplier.isEmpty ? '' : ' to $supplier'}',
+      sub: paySourceCopy(q.source).english,
+      value: peso(q.amount),
+      tint: attention ? WmColors.dangerTint : null,
+      border: attention ? WmColors.dangerBorder : null,
+      below: [
+        _StatusPill(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingToSendPayLabel),
+            color: attention ? WmColors.danger : WmColors.brownDeep, tint: attention ? WmColors.dangerTint : WmColors.brownTint),
+        if (why != null) ...[
+          const SizedBox(height: 6),
+          Text(why.english, style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w600)),
+          Text(why.tagalog, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
+          TextButton(key: Key('throw-pay-${q.opId}'), onPressed: onThrowAway, child: const Text('Throw away')),
+        ],
+      ],
     );
   }
 }
@@ -238,29 +314,25 @@ class _QueuedCard extends StatelessWidget {
     final d = q.draft;
     final attention = q.state == QueuedState.needsAttention;
     final why = attention ? purFailureCopy(q.failure ?? PurFailure.unexpected) : null;
-    return Card(
+    return _RowCard(
       key: Key('queued-${d.id}'),
-      color: attention ? WmColors.dangerTint : Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(child: Text(d.supplierName.isEmpty ? 'Purchase on ${d.purchaseDate}' : d.supplierName, style: const TextStyle(fontWeight: FontWeight.w800))),
-            Text(peso(parseMoney(d.receiptTotal) ?? 0), style: const TextStyle(fontWeight: FontWeight.w800)),
+      title: d.supplierName.isEmpty ? 'Purchase on ${d.purchaseDate}' : d.supplierName,
+      value: peso(parseMoney(d.receiptTotal) ?? 0),
+      tint: attention ? WmColors.dangerTint : null,
+      border: attention ? WmColors.dangerBorder : null,
+      below: [
+        _StatusPill(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingLabel),
+            color: attention ? WmColors.danger : WmColors.brownDeep, tint: attention ? WmColors.dangerTint : WmColors.brownTint),
+        if (why != null) ...[
+          const SizedBox(height: 6),
+          Text(why.english, style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w600)),
+          Text(why.tagalog, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
+          Wrap(children: [
+            TextButton(key: Key('fix-${d.id}'), onPressed: onFix, child: const Text('Fix and send again')),
+            TextButton(key: Key('throw-${d.id}'), onPressed: onThrowAway, child: const Text('Throw away')),
           ]),
-          BilingualText(attention ? attentionLabel : (q.state == QueuedState.sent ? sentLabel : waitingLabel),
-              style: TextStyle(fontWeight: FontWeight.w700, color: attention ? WmColors.danger : WmColors.brownDeep)),
-          if (why != null) ...[
-            const SizedBox(height: 6),
-            Text(why.english, style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w600)),
-            Text(why.tagalog, style: const TextStyle(color: WmColors.danger, fontSize: 12.5)),
-            Wrap(children: [
-              TextButton(key: Key('fix-${d.id}'), onPressed: onFix, child: const Text('Fix and send again')),
-              TextButton(key: Key('throw-${d.id}'), onPressed: onThrowAway, child: const Text('Throw away')),
-            ]),
-          ],
-        ]),
-      ),
+        ],
+      ],
     );
   }
 }
