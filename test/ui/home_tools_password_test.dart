@@ -340,7 +340,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('shortcut-tools')));
       await tester.pumpAndSettle();
-      expect(find.text('Tools'), findsOneWidget);
+      expect(find.byKey(const Key('tools-sheet')), findsOneWidget, reason: 'opened as the Tools sheet');
       expect(find.text('TOOL-0001 · Grinder'), findsOneWidget);
       expect(find.byKey(const Key('tools-parts')), findsNothing, reason: 'no Team for a worker');
     });

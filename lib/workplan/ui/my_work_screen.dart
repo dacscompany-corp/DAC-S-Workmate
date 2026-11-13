@@ -91,7 +91,7 @@ class _MyWorkScreenState extends State<MyWorkScreen> {
                     key: const Key('open-proposals'),
                     icon: Icons.lightbulb_outline,
                     label: 'My proposals',
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ProposalsScreen(controller: c))),
+                    onTap: () => showProposalsSheet(context, c),
                   ),
               ]),
               const SizedBox(height: 12),

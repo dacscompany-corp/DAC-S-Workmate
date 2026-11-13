@@ -61,6 +61,10 @@ class FakeToolsRemote implements ToolsRemote {
   /// Every write that reached the call, failed ones included: (op id, exact payload).
   final attempts = <(String opId, String payload)>[];
   int mineCalls = 0;
+  int detailCalls = 0;
+
+  /// Thrown by the read of one tool only (its history).
+  Object? failDetail;
   int teamCalls = 0;
   int checks = 0;
   int cancels = 0;
@@ -86,7 +90,10 @@ class FakeToolsRemote implements ToolsRemote {
   }
 
   @override
-  Future<PhoneTool> myTool(String toolId) => _read(_detail(myToolJson, mineAnswer, toolId), failMine);
+  Future<PhoneTool> myTool(String toolId) {
+    detailCalls++;
+    return _read(_detail(myToolJson, mineAnswer, toolId), failDetail ?? failMine);
+  }
 
   @override
   Future<List<PhoneTool>> teamTools() {
@@ -95,7 +102,10 @@ class FakeToolsRemote implements ToolsRemote {
   }
 
   @override
-  Future<PhoneTool> teamTool(String toolId) => _read(_detail(teamToolJson, teamAnswer, toolId), failTeam);
+  Future<PhoneTool> teamTool(String toolId) {
+    detailCalls++;
+    return _read(_detail(teamToolJson, teamAnswer, toolId), failDetail ?? failTeam);
+  }
 
   @override
   Future<FoundTool> find(String number) async {

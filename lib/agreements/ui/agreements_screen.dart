@@ -3,135 +3,144 @@ import 'package:flutter/material.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../attendance/ui/formats.dart' show clockTime, shortDate;
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart';
 import '../domain/my_agreement.dart';
 import 'agreements_controller.dart';
 import 'agreements_copy.dart';
 
-/// My agreements (Linked Labor): the signed-in worker's own linked agreements,
-/// read from the server each time. With no signal, or when the server refuses,
-/// the amounts are gone and the screen says why — never an old balance.
-class AgreementsScreen extends StatelessWidget {
-  const AgreementsScreen({super.key, required this.controller});
-
-  final AgreementsController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: WmColors.canvas,
-      appBar: AppBar(title: Text(myAgreementsTitle.english)),
-      body: ListenableBuilder(
-        listenable: controller,
-        builder: (context, _) {
-          final c = controller;
-          final f = c.failure;
-          final children = <Widget>[
-            if (f != null) _Notice(text: agreementsFailureCopy(f), onRetry: c.refresh),
-            if (f == null && c.loading && !c.loaded) const _Checking(),
-            if (f == null && c.loaded && c.agreements.isEmpty) _Plain(agreementsNone),
-            for (final a in c.agreements)
-              _AgreementTile(
-                a: a,
-                onOpen: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => AgreementDetailScreen(controller: c, agreementId: a.id))),
-              ),
-            if (c.agreements.isNotEmpty && c.fetchedAt != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('Updated ${clockTime(c.fetchedAt!)}', style: const TextStyle(fontSize: 12, color: WmColors.textMuted)),
-              ),
-            const SizedBox(height: 8),
-            _Plain(agreementsFootnote, muted: true),
-          ];
-          return RefreshIndicator(
-            onRefresh: c.refresh,
-            child: ListView(padding: const EdgeInsets.all(16), physics: const AlwaysScrollableScrollPhysics(), children: children),
-          );
-        },
-      ),
-    );
-  }
+/// Opens the My agreements sheet (Home's shortcut, Profile's row). It reads
+/// again as it opens: a sheet has no pull-down.
+Future<void> showAgreementsSheet(BuildContext context, AgreementsController controller) {
+  controller.refresh();
+  return showWmSheet<void>(context, builder: (_) => AgreementsSheet(controller: controller));
 }
 
-/// One agreement, shown only while the server still lists it for this account.
-class AgreementDetailScreen extends StatelessWidget {
-  const AgreementDetailScreen({super.key, required this.controller, required this.agreementId});
+/// My agreements (Linked Labor), a sheet since Phase 5: the signed-in worker's
+/// own linked agreements, read from the server each time. An agreement opens in
+/// place (one at a time) with its works and payments. With no signal, or when
+/// the server refuses, the amounts are gone and the sheet says why — never an
+/// old balance.
+class AgreementsSheet extends StatefulWidget {
+  const AgreementsSheet({super.key, required this.controller});
 
   final AgreementsController controller;
-  final String agreementId;
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: WmColors.canvas,
-      appBar: AppBar(title: const Text('Agreement')),
-      body: ListenableBuilder(
-        listenable: controller,
+  State<AgreementsSheet> createState() => _AgreementsSheetState();
+}
+
+class _AgreementsSheetState extends State<AgreementsSheet> {
+  /// The agreement that is open. It stays while the server is asked again (the
+  /// controller empties its list meanwhile) and closes once an answer no longer
+  /// has it.
+  String? _openId;
+
+  /// The open agreement is no longer listed for this account.
+  bool _gone = false;
+
+  AgreementsController get _c => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addListener(_sync);
+  }
+
+  @override
+  void dispose() {
+    _c.removeListener(_sync);
+    super.dispose();
+  }
+
+  /// Runs before the builder below rebuilds (added first), so it only sets fields.
+  void _sync() {
+    if (_c.loading) {
+      _gone = false;
+      return;
+    }
+    final id = _openId;
+    if (id != null && _c.byId(id) == null) {
+      _gone = _c.failure == null;
+      _openId = null;
+    }
+  }
+
+  void _toggle(String id) => setState(() {
+        _gone = false;
+        _openId = _openId == id ? null : id;
+      });
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: _c,
         builder: (context, _) {
-          final a = controller.byId(agreementId);
-          final f = controller.failure;
-          if (a == null) {
-            // Checking (no figure until the server answers), or why there is none.
-            return ListView(padding: const EdgeInsets.all(16), children: [
-              if (controller.loading)
-                const _Checking()
-              else if (f != null)
-                _Notice(text: agreementsFailureCopy(f), onRetry: controller.refresh)
-              else
-                _Plain(agreementGone),
-            ]);
-          }
-          return RefreshIndicator(
-            onRefresh: controller.refresh,
-            child: ListView(padding: const EdgeInsets.all(16), physics: const AlwaysScrollableScrollPhysics(), children: [
-              _Header(a: a),
-              const SizedBox(height: 12),
-              _Money(a: a),
+          final c = _c;
+          final f = c.failure;
+          return WmSheetFrame(
+            key: const Key('agreements-sheet'),
+            title: myAgreementsTitle.english,
+            subtitle: myAgreementsTitle.tagalog,
+            tall: true,
+            children: [
+              if (f != null) _Notice(text: agreementsFailureCopy(f), onRetry: c.refresh),
+              if (f == null && c.loading && !c.loaded) const _Checking(),
+              if (f == null && c.loaded && _gone) ...[_Plain(agreementGone), const SizedBox(height: 12)],
+              if (f == null && c.loaded && c.agreements.isEmpty) _Plain(agreementsNone),
+              for (final a in c.agreements) _agreementCard(a),
+              if (c.agreements.isNotEmpty && c.fetchedAt != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('Updated ${clockTime(c.fetchedAt!)}', style: const TextStyle(fontSize: 12, color: WmColors.textMuted)),
+                ),
+              const SizedBox(height: 8),
+              _Plain(agreementsFootnote, muted: true),
+            ],
+          );
+        },
+      );
+
+  /// The closed card is today's tile with an expand arrow; opened, it adds what
+  /// the old agreement page showed: the works covered and the payments.
+  Widget _agreementCard(MyAgreement a) {
+    final open = _openId == a.id;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: WmColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InkWell(
+          key: Key('agreement-${a.id}'),
+          onTap: () => _toggle(a.id),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: _Header(a: a)),
+                Icon(open ? Icons.expand_less : Icons.expand_more, color: WmColors.textMuted),
+              ]),
+              const SizedBox(height: 10),
+              _Money(a: a, compact: true),
+            ]),
+          ),
+        ),
+        if (open)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (a.works.isNotEmpty) ...[
-                const SizedBox(height: 16),
                 const _Label('Works covered'),
                 for (final (i, w) in a.works.indexed) Text('${i + 1}. $w', style: const TextStyle(fontSize: 14, height: 1.5)),
+                const SizedBox(height: 16),
               ],
-              const SizedBox(height: 16),
               const _Label('Payments'),
               if (a.payments.isEmpty)
                 const Text('No payments recorded yet.', style: TextStyle(color: WmColors.textMuted))
               else
                 for (final p in a.payments) _PaymentRow(p: p),
-              const SizedBox(height: 16),
-              _Plain(agreementsFootnote, muted: true),
             ]),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _AgreementTile extends StatelessWidget {
-  const _AgreementTile({required this.a, required this.onOpen});
-
-  final MyAgreement a;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        key: Key('agreement-${a.id}'),
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: WmColors.border)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _Header(a: a),
-            const SizedBox(height: 10),
-            _Money(a: a, compact: true),
-          ]),
-        ),
-      ),
+          ),
+      ]),
     );
   }
 }

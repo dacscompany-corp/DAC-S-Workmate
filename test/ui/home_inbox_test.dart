@@ -24,7 +24,6 @@ import 'package:workmate/workplan/data/workplan_api.dart';
 import 'package:workmate/workplan/domain/wp_op.dart';
 import 'package:workmate/workplan/domain/wp_rules.dart';
 import 'package:workmate/workplan/ui/my_work_screen.dart';
-import 'package:workmate/workplan/ui/proposals_screen.dart';
 import 'package:workmate/workplan/ui/task_sheet.dart';
 import 'package:workmate/workplan/workplan_services.dart';
 
@@ -153,7 +152,7 @@ void main() {
     expect(find.byKey(const Key('shortcut-new-request')), findsNothing);
     await tester.tap(find.byKey(const Key('shortcut-proposals')));
     await tester.pumpAndSettle();
-    expect(find.byType(ProposalsScreen), findsOneWidget);
+    expect(find.byKey(const Key('proposals-sheet')), findsOneWidget);
   });
 
   testWidgets('a Time In still on the phone: "1 not sent yet", never "All sent"', (tester) async {
@@ -235,7 +234,7 @@ void main() {
     await tester.tap(find.byKey(const Key('needs-toolUnresolved-op7')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.byType(ToolsScreen), findsOneWidget);
+    expect(find.byType(ToolsSheet), findsOneWidget);
   });
 
   group('the badge counts what is still on the phone, each alone', () {

@@ -5,6 +5,7 @@ import '../../attendance/ui/formats.dart' show clockTime;
 import '../../purchasing/ui/purchasing_copy.dart' show BilingualText, bilingualButton;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/tool_submitter.dart';
 import '../domain/tool_failure.dart';
 import '../domain/tool_submission.dart';
@@ -71,44 +72,48 @@ mixin ToolSending<T extends StatefulWidget> on State<T> {
     }
   }
 
-  /// Send, or — once locked — the unresolved box in its place.
-  Widget sendArea({required Key sendKey, required VoidCallback onSend}) {
+  /// The unresolved box, once locked (the form's body shows it in place of Send).
+  Widget? sendBox() {
     final op = unsureOp;
-    if (op != null) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: ToolUnresolvedBox(
-          submitter: submitter,
-          opId: op,
-          firstFailure: _unsureWhy,
-          inForm: true,
-          onRecorded: () {
-            if (mounted) Navigator.of(context).pop(true);
-          },
-          // Settled not recorded — refused, or cancelled by the server: the
-          // fields open again, saying why; the next Send is a new operation.
-          onSettledNotRecorded: (f) => setState(() {
-            unsureOp = null;
-            failure = f;
-          }),
-        ),
-      );
-    }
+    if (op == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: ToolUnresolvedBox(
+        submitter: submitter,
+        opId: op,
+        firstFailure: _unsureWhy,
+        inForm: true,
+        onRecorded: () {
+          if (mounted) Navigator.of(context).pop(true);
+        },
+        // Settled not recorded — refused, or cancelled by the server: the
+        // fields open again, saying why; the next Send is a new operation.
+        onSettledNotRecorded: (f) => setState(() {
+          unsureOp = null;
+          failure = f;
+        }),
+      ),
+    );
+  }
+
+  /// The pinned footer: the refusal or finish-first notice above the Send
+  /// button (two languages). Null once locked, when [sendBox] is shown instead.
+  Widget? sendFooter({required Key sendKey, required VoidCallback onSend}) {
+    if (locked) return null;
     final f = failure;
     final m = message;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (f != null)
         Padding(
-          padding: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.only(bottom: 12),
           child: FailureNotice(key: const Key('tool-failure'), english: toolFailureCopy(f).english, tagalog: toolFailureCopy(f).tagalog),
         ),
       if (m != null)
         Padding(
-          padding: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.only(bottom: 12),
           child: FailureNotice(key: const Key('tool-blocked'), english: m.english, tagalog: m.tagalog),
         ),
-      const SizedBox(height: 12),
-      sending ? const LinearProgressIndicator() : bilingualButton(sendLabel, onSend, filled: true, key: sendKey),
+      WmSheetButton(key: sendKey, label: sendLabel.english, tagalog: sendLabel.tagalog, icon: Icons.send, onPressed: onSend, busy: sending),
     ]);
   }
 }

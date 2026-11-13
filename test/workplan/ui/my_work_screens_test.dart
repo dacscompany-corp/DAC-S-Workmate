@@ -64,6 +64,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// My proposals opens as a sheet over a plain page (as from Home).
+  Future<void> openProposals(WidgetTester tester) async {
+    useTallPhone(tester);
+    await tester.pumpWidget(wrap(Builder(
+      builder: (context) => Center(
+        child: TextButton(onPressed: () => showProposalsSheet(context, controller), child: const Text('open proposals')),
+      ),
+    )));
+    await tester.tap(find.text('open proposals'));
+    await tester.pumpAndSettle();
+  }
+
   /// The task opens as a sheet over a plain page (as from My Work or Home).
   Future<void> openTaskSheet(WidgetTester tester, {VoidCallback? onMakeRequest}) async {
     useTallPhone(tester);
@@ -380,12 +392,12 @@ void main() {
     api.view = WorkPlanView(proposals: [
       WpProposal.fromJson(proposalDoc(id: 'p1', status: 'declined', reason: 'Already planned')),
     ]);
-    await open(tester, ProposalsScreen(controller: controller));
+    await openProposals(tester);
     expect(find.text('Declined'), findsOneWidget);
     expect(find.text('Office: Already planned'), findsOneWidget);
     await tester.tap(find.byKey(const Key('propose')));
     await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(find.byKey(const Key('propose-send'))).onPressed, isNull);
+    expect(tester.widget<WmSheetButton>(find.byKey(const Key('propose-send'))).onPressed, isNull);
     await tester.tap(find.byKey(const Key('propose-destination')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Barlin Residence · Main Contract').last);
@@ -398,11 +410,56 @@ void main() {
     expect(find.byKey(const Key('propose')), findsOneWidget, reason: 'back on the list');
   });
 
+  testWidgets('Propose a task is a page: round back button, Send to the office pinned in the footer', (tester) async {
+    await openProposals(tester);
+    await tester.tap(find.byKey(const Key('propose')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final send = tester.getRect(find.byKey(const Key('propose-send')));
+    expect(send.bottom, greaterThan(screen.height - 140), reason: 'Send sits in the pinned footer');
+    expect(find.text('Send to the office'), findsOneWidget);
+  });
+
   testWidgets('a worker who leads no team is told, not shown an empty form', (tester) async {
     api.choicesResult = const WpChoices(teams: [], destinations: [barlin]);
-    await open(tester, ProposalsScreen(controller: controller));
+    await openProposals(tester);
     await tester.tap(find.byKey(const Key('propose')));
     await tester.pumpAndSettle();
     expect(find.text('You are not leading a team right now, so you cannot propose tasks.'), findsOneWidget);
+  });
+
+  testWidgets('My proposals is a sheet: key, title, Propose a task full width, green, with a plus', (tester) async {
+    await openProposals(tester);
+    expect(find.byKey(const Key('proposals-sheet')), findsOneWidget);
+    expect(find.text('My proposals'), findsOneWidget);
+    final button = find.byKey(const Key('propose'));
+    expect(tester.widget(button), isA<WmSheetButton>());
+    expect(find.descendant(of: button, matching: find.byIcon(Icons.add)), findsOneWidget);
+    expect(find.descendant(of: button, matching: find.text('Propose a task')), findsOneWidget);
+    final sheet = tester.getRect(find.byKey(const Key('proposals-sheet')));
+    expect(tester.getSize(button).width, closeTo(sheet.width - 40, 1), reason: 'full width inside the sheet padding');
+    expect(find.text('The office reviews each proposal. Nothing reaches the team until the office publishes it.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wm-sheet-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('proposals-sheet')), findsNothing);
+  });
+
+  testWidgets('a leader opens My proposals from the pill on My Work', (tester) async {
+    await open(tester, MyWorkScreen(controller: controller, services: services, isLeader: true));
+    await tester.ensureVisible(find.byKey(const Key('open-proposals')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-proposals')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('proposals-sheet')), findsOneWidget);
+  });
+
+  testWidgets('a sent proposal shows in the sheet, with its state, when the form closes', (tester) async {
+    api.view = WorkPlanView(proposals: [
+      WpProposal.fromJson(proposalDoc(id: 'p2', status: 'published')),
+    ]);
+    await openProposals(tester);
+    expect(find.byKey(const Key('proposal-p2')), findsOneWidget);
+    expect(find.text('If you are on it, it is in My Work.'), findsOneWidget);
   });
 }

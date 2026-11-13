@@ -45,7 +45,17 @@ void main() {
     submitter = ToolSubmitter(remote: remote, store: store);
     await submitter.load(user);
     await controller.refresh();
-    await tester.pumpWidget(wrap(ToolsScreen(controller: controller, submitter: submitter)));
+    await tester.pumpWidget(const SizedBox()); // a fresh app: any earlier sheet is gone
+    await tester.pumpWidget(wrap(Builder(
+      builder: (context) => Center(
+        child: ElevatedButton(
+          key: const Key('open-tools'),
+          onPressed: () => showToolsSheet(context, controller, submitter),
+          child: const Text('Open tools'),
+        ),
+      ),
+    )));
+    await tester.tap(find.byKey(const Key('open-tools')));
     await tester.pumpAndSettle();
   }
 
@@ -104,7 +114,8 @@ void main() {
     expect([w.$1, w.$2['p_tool'], w.$2['p_kind'], w.$2['p_note']], ['tl_report_problem', t.id, 'dont_have', 'Left at the old site']);
     sameParams(w);
     expect(find.byKey(const Key('tool-recorded')), findsOneWidget);
-    expect(find.text('Tools'), findsOneWidget, reason: 'back on Tools');
+    expect(find.text('Recorded. · Naitala na.'), findsOneWidget, reason: 'visible while the sheet is open');
+    expect(find.byKey(const Key('tools-sheet')), findsOneWidget, reason: 'back on the Tools sheet');
   });
 
   testWidgets('Report a problem twice: the server\'s "Already reported" is shown, nothing changes', (tester) async {
@@ -254,9 +265,7 @@ void main() {
     await tapKey(tester, 'tool-send');
     await tapKey(tester, 'unsure-check');
     expect(find.text('Not recorded yet — it may still arrive. Send it again, or cancel it.'), findsOneWidget);
-    // Leave the form and the tool's page: back on Tools.
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+    // Leave the form: back on the Tools sheet.
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('Returned TOOL-0001 Grinder from Amy (W-0001) — Good'), findsOneWidget, reason: 'it waits at the top');
@@ -284,6 +293,193 @@ void main() {
     final w = remote.writes.single;
     expect([w.$1, w.$2['p_record'], w.$2['p_reason']], ['tl_team_reverse', can.id, 'Wrong person']);
     sameParams(w);
+  });
+
+  /// Each form is a WmPage: a round back button, and Send pinned at the bottom of the screen.
+  void expectPinnedSend(WidgetTester tester) {
+    expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final send = tester.getRect(find.byKey(const Key('tool-send')));
+    expect(send.bottom, greaterThan(screen.height - 140), reason: 'Send sits in the pinned footer');
+    expect(send.bottom, lessThanOrEqualTo(screen.height));
+  }
+
+  testWidgets('every tool form is a page with Send pinned in the footer and a round back button', (tester) async {
+    await showTools(tester, leader: true);
+    // Report a problem (a tool held by the signed-in person: Mine).
+    await tester.tap(find.text('Mine (2)'));
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'tool-${remote.mineAnswer.first.id}');
+    await tapKey(tester, 'tool-report');
+    expectPinnedSend(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    // Issue a tool.
+    await team(tester);
+    await tapKey(tester, 'tools-issue');
+    expectPinnedSend(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    // Hand over, then Return.
+    await openTeamTool(tester, remote.teamAnswer[1]);
+    await tapKey(tester, 'tool-handover');
+    expectPinnedSend(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'tool-return');
+    expectPinnedSend(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    // Undo (the switch is at the top of the sheet's list: scroll back up to it).
+    await tester.drag(find.byType(ListView).first, const Offset(0, 2000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('My records'));
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'undo-${remote.recordsAnswer.firstWhere((r) => r.canReverse).id}');
+    expectPinnedSend(tester);
+  });
+
+  // ── The sheet itself ────────────────────────────────────────────
+
+  testWidgets("a worker's own tool opens in place with Report a problem only", (tester) async {
+    await showTools(tester);
+    expect(find.byKey(const Key('tools-sheet')), findsOneWidget);
+    expect(find.text('My tools'), findsOneWidget);
+    await tapKey(tester, 'tool-${remote.mineAnswer.first.id}');
+    expect(find.byKey(const Key('tool-report')), findsOneWidget);
+    expect(find.byKey(const Key('tool-handover')), findsNothing);
+    expect(find.byKey(const Key('tool-return')), findsNothing);
+  });
+
+  testWidgets("a leader's team tool in good condition: Hand over and Return", (tester) async {
+    await showTools(tester, leader: true);
+    await openTeamTool(tester, remote.teamAnswer.first);
+    expect(find.byKey(const Key('tool-handover')), findsOneWidget);
+    expect(find.byKey(const Key('tool-return')), findsOneWidget);
+    expect(find.byKey(const Key('tool-report')), findsNothing);
+  });
+
+  testWidgets('a team tool needing repair: the note and Return, no Hand over', (tester) async {
+    final raw = {...remote.teamAnswer[3].raw, 'condition': 'needs_repair'};
+    remote.teamAnswer = [...remote.teamAnswer.take(3), PhoneTool.fromJson(raw)];
+    await showTools(tester, leader: true);
+    await openTeamTool(tester, remote.teamAnswer[3]);
+    expect(find.textContaining('It needs repair, so it stays with them'), findsOneWidget);
+    expect(find.byKey(const Key('tool-handover')), findsNothing);
+    expect(find.byKey(const Key('tool-return')), findsOneWidget);
+  });
+
+  testWidgets('history rows appear after the card opens; not before', (tester) async {
+    await showTools(tester);
+    expect(find.text('Issued'), findsNothing);
+    await tapKey(tester, 'tool-${remote.mineAnswer.first.id}');
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Issued'), findsOneWidget);
+  });
+
+  testWidgets('history that cannot be read says so, in two languages', (tester) async {
+    await showTools(tester);
+    remote.failReads = const SocketException('no signal');
+    await tapKey(tester, 'tool-${remote.mineAnswer.first.id}');
+    expect(find.byKey(const Key('tool-history-failure')), findsOneWidget);
+    expect(find.text('Its history needs signal.'), findsOneWidget);
+  });
+
+  testWidgets('opening a second card closes the first; tapping an open card closes it', (tester) async {
+    await showTools(tester, leader: true);
+    await tester.tap(find.byKey(const Key('tools-part-team')));
+    await tester.pumpAndSettle();
+    final a = remote.teamAnswer[0], b = remote.teamAnswer[1];
+    await tapKey(tester, 'tool-${a.id}');
+    expect(find.byKey(const Key('tool-return')), findsOneWidget);
+    await tapKey(tester, 'tool-${b.id}');
+    expect(find.byKey(const Key('tool-return')), findsOneWidget, reason: 'only one card is open');
+    await tapKey(tester, 'tool-${b.id}');
+    expect(find.byKey(const Key('tool-return')), findsNothing, reason: 'closed again');
+  });
+
+  testWidgets("the leader's switch shows the counts and changes the part", (tester) async {
+    await showTools(tester, leader: true);
+    expect(find.byKey(const Key('tools-part-mine')), findsOneWidget);
+    expect(find.text('Mine (2)'), findsOneWidget);
+    expect(find.text('Team (4)'), findsOneWidget);
+    expect(find.text('My records'), findsOneWidget);
+    expect(find.byKey(const Key('tools-issue')), findsNothing);
+    await tester.tap(find.byKey(const Key('tools-part-team')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tools-issue')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tools-part-records')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tools-issue')), findsNothing);
+    expect(find.byKey(Key('undo-${remote.recordsAnswer.firstWhere((r) => r.canReverse).id}')), findsOneWidget);
+  });
+
+  testWidgets('the sheet closes with Back', (tester) async {
+    await showTools(tester);
+    await tester.binding.handlePopRoute(); // Android Back
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tools-sheet')), findsNothing);
+  });
+
+  testWidgets("after a form records, the sheet reads again and re-reads the open card's history", (tester) async {
+    await showTools(tester);
+    final t = remote.mineAnswer.first;
+    await tapKey(tester, 'tool-${t.id}');
+    final before = remote.mineCalls;
+    final details = remote.detailCalls;
+    await tapKey(tester, 'tool-report');
+    await tapKey(tester, 'report-broken');
+    await tapKey(tester, 'tool-send');
+    expect(remote.mineCalls, greaterThan(before), reason: 'the list was read again');
+    expect(remote.detailCalls, details + 1, reason: 'the open tool itself was read again');
+    expect(find.text('Recorded. · Naitala na.'), findsOneWidget);
+    expect(find.text('Issued'), findsOneWidget, reason: 'history is still shown for the open card');
+  });
+
+  testWidgets('"Recorded." does not stay once another form is opened', (tester) async {
+    await showTools(tester);
+    final t = remote.mineAnswer.first;
+    await tapKey(tester, 'tool-${t.id}');
+    await tapKey(tester, 'tool-report');
+    await tapKey(tester, 'report-broken');
+    await tapKey(tester, 'tool-send');
+    expect(find.byKey(const Key('tool-recorded')), findsOneWidget);
+    await tapKey(tester, 'tool-report');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tool-recorded')), findsNothing, reason: 'that form recorded nothing');
+  });
+
+  testWidgets('after a record, a re-read that fails shows no history from before it', (tester) async {
+    await showTools(tester);
+    final t = remote.mineAnswer.first;
+    await tapKey(tester, 'tool-${t.id}');
+    expect(find.text('Issued'), findsOneWidget);
+    await tapKey(tester, 'tool-report');
+    await tapKey(tester, 'report-broken');
+    remote.failDetail = const SocketException('down');
+    await tapKey(tester, 'tool-send');
+    expect(find.byKey(const Key('tool-recorded')), findsOneWidget);
+    expect(find.text('Issued'), findsNothing, reason: 'the old history is not shown as if it were current');
+    expect(find.byKey(const Key('tool-history-failure')), findsOneWidget);
+  });
+
+  testWidgets('a refusal from the waiting box is shown pinned inside the sheet, in view', (tester) async {
+    await showTools(tester, leader: true);
+    await openTeamTool(tester, remote.teamAnswer.first);
+    await tapKey(tester, 'tool-return');
+    await tapKey(tester, 'return-good');
+    remote.failNextWrite = TimeoutException('lost on the way');
+    await tapKey(tester, 'tool-send');
+    await tapKey(tester, 'unsure-check');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'unsure-cancel');
+    expect(find.byKey(const Key('tool-refused')), findsOneWidget);
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final r = tester.getRect(find.byKey(const Key('tool-refused')));
+    expect(r.bottom, lessThanOrEqualTo(screen.height));
+    expect(r.top, greaterThan(screen.height - 220), reason: 'in the pinned footer');
   });
 
   testWidgets('Undo, the answer lost: Cancel it — nothing is recorded', (tester) async {

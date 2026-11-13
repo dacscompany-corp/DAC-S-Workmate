@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
 import '../domain/attendance_record.dart';
 import '../domain/history.dart';
 import '../domain/total_hours.dart';
@@ -36,7 +37,14 @@ class HistoryScreen extends StatelessWidget {
                 const SizedBox(height: 2),
                 const Text('Your recorded days', style: TextStyle(fontSize: 14, color: WmColors.textMuted)),
                 const SizedBox(height: 14),
-                _SpanSwitch(span: c.span, onChanged: c.setSpan),
+                WmSegmented<HistorySpan>(
+                  segments: const [
+                    (HistorySpan.week, 'Week', Key('span-week')),
+                    (HistorySpan.month, 'Month', Key('span-month')),
+                  ],
+                  selected: c.span,
+                  onChanged: c.setSpan,
+                ),
                 const SizedBox(height: 14),
                 if (failure != null)
                   AttendanceFailureNotice(failure: failure, onRetry: c.refresh)
@@ -54,50 +62,6 @@ class HistoryScreen extends StatelessWidget {
             ),
           );
         },
-      );
-}
-
-/// Week / Month as one switch: a grey track, the chosen half white.
-class _SpanSwitch extends StatelessWidget {
-  const _SpanSwitch({required this.span, required this.onChanged});
-  final HistorySpan span;
-  final ValueChanged<HistorySpan> onChanged;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(color: WmColors.inert, borderRadius: BorderRadius.circular(999)),
-        child: Row(children: [
-          for (final (s, label) in const [(HistorySpan.week, 'Week'), (HistorySpan.month, 'Month')]) ...[
-            if (s != HistorySpan.week) const SizedBox(width: 4),
-            Expanded(
-              child: Semantics(
-                key: Key('span-${s.name}'),
-                button: true,
-                selected: s == span,
-                child: Material(
-                  color: s == span ? Colors.white : Colors.transparent,
-                  shape: const StadiumBorder(),
-                  child: InkWell(
-                    customBorder: const StadiumBorder(),
-                    onTap: () => onChanged(s),
-                    child: SizedBox(
-                      height: 38,
-                      child: Center(
-                        child: Text(label,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: s == span ? FontWeight.w800 : FontWeight.w600,
-                              color: s == span ? WmColors.text : WmColors.textMuted,
-                            )),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ]),
       );
 }
 

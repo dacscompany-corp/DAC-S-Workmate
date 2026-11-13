@@ -349,21 +349,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void _openAgreements() {
     final c = _agreements;
     if (c == null) return;
-    c.refresh();
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AgreementsScreen(controller: c)));
+    showAgreementsSheet(context, c);
   }
 
   void _openTools() {
     final c = _tools;
     final s = _toolSubmitter;
     if (c == null || s == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ToolsScreen(controller: c, submitter: s)));
+    showToolsSheet(context, c, s);
   }
 
   bool get _isLeader => widget.worker.role == 'teamLeader';
 
-  void _openProposals(MyWorkController work) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ProposalsScreen(controller: work)));
+  void _openProposals(MyWorkController work) => showProposalsSheet(context, work);
 
   /// A "Needs you" row's button: opens exactly what the tab would.
   Future<void> _openNeed(NeedsRow row) async {

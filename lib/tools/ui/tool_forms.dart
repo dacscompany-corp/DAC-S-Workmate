@@ -4,6 +4,7 @@ import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../purchasing/ui/purchasing_copy.dart' show BilingualText;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
 import '../data/tool_submitter.dart';
 import '../data/tools_remote.dart';
 import '../domain/tool_failure.dart';
@@ -74,6 +75,13 @@ class _ToolHeader extends StatelessWidget {
       ]);
 }
 
+/// The footer: the form's send area with the form's note under the button.
+/// Locked (answer lost), the unresolved box is in the body instead, so the
+/// note goes there too.
+Widget? _footerWithNote(Widget? send, Widget note) => send == null
+    ? null
+    : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [send, const SizedBox(height: 8), note]);
+
 Widget _loadFailureNotice(ToolFailure f, VoidCallback retry) => Padding(
       padding: const EdgeInsets.all(16),
       child: FailureNotice(
@@ -121,28 +129,27 @@ class _ReportProblemScreenState extends State<ReportProblemScreen> with ToolSend
   @override
   Widget build(BuildContext context) {
     final t = widget.tool;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Report a problem')),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          _ToolHeader(label: t.label, name: t.name, details: t.details),
-          const ToolFieldLabel("What's wrong?"),
-          for (final k in ProblemKind.values)
-            _Choice(
-              key: Key('report-${k.code}'),
-              label: problemCopy(k),
-              selected: _kind == k,
-              onTap: locked ? null : () => setState(() => _kind = k),
-            ),
-          const ToolFieldLabel('Note (optional)'),
-          TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
-          sendArea(sendKey: const Key('tool-send'), onSend: _send),
-          const SizedBox(height: 8),
-          const BilingualText(
-              Bilingual('It changes nothing on the tool: the office checks it.', 'Walang binabago sa tool: titingnan ito ng opisina.'),
-              style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
-        ]),
-      ),
+    const note = BilingualText(
+        Bilingual('It changes nothing on the tool: the office checks it.', 'Walang binabago sa tool: titingnan ito ng opisina.'),
+        style: TextStyle(fontSize: 12.5, color: WmColors.textMuted));
+    return WmPage(
+      title: 'Report a problem',
+      footer: _footerWithNote(sendFooter(sendKey: const Key('tool-send'), onSend: _send), note),
+      children: [
+        _ToolHeader(label: t.label, name: t.name, details: t.details),
+        const ToolFieldLabel("What's wrong?"),
+        for (final k in ProblemKind.values)
+          _Choice(
+            key: Key('report-${k.code}'),
+            label: problemCopy(k),
+            selected: _kind == k,
+            onTap: locked ? null : () => setState(() => _kind = k),
+          ),
+        const ToolFieldLabel('Note (optional)'),
+        TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
+        ?sendBox(),
+        if (locked) ...[const SizedBox(height: 8), note],
+      ],
     );
   }
 }
@@ -286,15 +293,17 @@ class _IssueToolScreenState extends State<IssueToolScreen> with ToolSending {
   Widget build(BuildContext context) {
     final c = _choices;
     final failure = _loadFailure;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Issue a tool')),
-      body: SafeArea(
-        child: failure != null
-            ? _loadFailureNotice(failure, _loadChoices)
-            : c == null
-                ? const Center(child: CircularProgressIndicator())
-                : ListView(padding: const EdgeInsets.all(16), children: _fields(c)),
-      ),
+    return WmPage(
+      title: 'Issue a tool',
+      footer: failure != null || c == null
+          ? null
+          : _footerWithNote(sendFooter(sendKey: const Key('tool-send'), onSend: _send),
+              const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted))),
+      children: failure != null
+          ? [_loadFailureNotice(failure, _loadChoices)]
+          : c == null
+              ? const [Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator()))]
+              : _fields(c),
     );
   }
 
@@ -376,9 +385,8 @@ class _IssueToolScreenState extends State<IssueToolScreen> with ToolSending {
       if (tool != null && _folder != null) ..._requestFields(),
       const ToolFieldLabel('Note (optional)'),
       TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
-      sendArea(sendKey: const Key('tool-send'), onSend: _send),
-      const SizedBox(height: 8),
-      const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+      ?sendBox(),
+      if (locked) ...[const SizedBox(height: 8), const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted))],
     ];
   }
 
@@ -475,52 +483,53 @@ class _HandoverToolScreenState extends State<HandoverToolScreen> with ToolSendin
     final c = _choices;
     final t = widget.tool;
     final failure = _loadFailure;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Hand over')),
-      body: SafeArea(
-        child: failure != null
-            ? _loadFailureNotice(failure, _load)
-            : c == null
-                ? const Center(child: CircularProgressIndicator())
-                : ListView(padding: const EdgeInsets.all(16), children: [
-                    _ToolHeader(label: t.label, name: t.name, details: t.details, extra: 'With ${t.holderName ?? '—'} · ${t.folderName ?? ''}'),
-                    if (t.condition != null && t.condition != ToolCondition.good)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 10),
-                        child: BilingualText(needsRepairStays, style: TextStyle(fontSize: 13, color: WmColors.brownDeep)),
-                      ),
-                    const ToolFieldLabel('Hand it to'),
-                    DropdownButtonFormField<String>(
-                      key: const Key('handover-person'),
-                      initialValue: _holder,
-                      isExpanded: true,
-                      hint: const Text('Choose the person'),
-                      items: [
-                        for (final m in c.members)
-                          if (m.id != t.holderId) DropdownMenuItem(value: m.id, child: Text(m.name, overflow: TextOverflow.ellipsis)),
-                      ],
-                      onChanged: locked ? null : (v) => setState(() => _holder = v),
+    return WmPage(
+      title: 'Hand over',
+      footer: failure != null || c == null
+          ? null
+          : _footerWithNote(sendFooter(sendKey: const Key('tool-send'), onSend: _send),
+              const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted))),
+      children: failure != null
+          ? [_loadFailureNotice(failure, _load)]
+          : c == null
+              ? const [Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator()))]
+              : [
+                  _ToolHeader(label: t.label, name: t.name, details: t.details, extra: 'With ${t.holderName ?? '—'} · ${t.folderName ?? ''}'),
+                  if (t.condition != null && t.condition != ToolCondition.good)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 10),
+                      child: BilingualText(needsRepairStays, style: TextStyle(fontSize: 13, color: WmColors.brownDeep)),
                     ),
-                    const ToolFieldLabel('Project'),
-                    DropdownButtonFormField<String>(
-                      key: const Key('handover-project'),
-                      initialValue: _folder,
-                      isExpanded: true,
-                      items: [
-                        if (t.folderId != null)
-                          DropdownMenuItem(value: t.folderId, child: Text('Stays on ${t.folderName ?? 'its project'}', overflow: TextOverflow.ellipsis)),
-                        for (final p in c.projects)
-                          if (p.folderId != t.folderId) DropdownMenuItem(value: p.folderId, child: Text(p.name, overflow: TextOverflow.ellipsis)),
-                      ],
-                      onChanged: locked ? null : (v) => setState(() => _folder = v),
-                    ),
-                    const ToolFieldLabel('Note (optional)'),
-                    TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
-                    sendArea(sendKey: const Key('tool-send'), onSend: _send),
-                    const SizedBox(height: 8),
-                    const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
-                  ]),
-      ),
+                  const ToolFieldLabel('Hand it to'),
+                  DropdownButtonFormField<String>(
+                    key: const Key('handover-person'),
+                    initialValue: _holder,
+                    isExpanded: true,
+                    hint: const Text('Choose the person'),
+                    items: [
+                      for (final m in c.members)
+                        if (m.id != t.holderId) DropdownMenuItem(value: m.id, child: Text(m.name, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: locked ? null : (v) => setState(() => _holder = v),
+                  ),
+                  const ToolFieldLabel('Project'),
+                  DropdownButtonFormField<String>(
+                    key: const Key('handover-project'),
+                    initialValue: _folder,
+                    isExpanded: true,
+                    items: [
+                      if (t.folderId != null)
+                        DropdownMenuItem(value: t.folderId, child: Text('Stays on ${t.folderName ?? 'its project'}', overflow: TextOverflow.ellipsis)),
+                      for (final p in c.projects)
+                        if (p.folderId != t.folderId) DropdownMenuItem(value: p.folderId, child: Text(p.name, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: locked ? null : (v) => setState(() => _folder = v),
+                  ),
+                  const ToolFieldLabel('Note (optional)'),
+                  TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
+                  ?sendBox(),
+                  if (locked) ...[const SizedBox(height: 8), const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted))],
+                ],
     );
   }
 }
@@ -565,27 +574,26 @@ class _ReturnToolScreenState extends State<ReturnToolScreen> with ToolSending {
   @override
   Widget build(BuildContext context) {
     final t = widget.tool;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Return')),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          _ToolHeader(label: t.label, name: t.name, details: t.details, extra: 'From ${t.holderName ?? '—'} · ${t.folderName ?? ''}'),
-          const ToolFieldLabel('Its condition'),
-          for (final c in ToolCondition.values)
-            _Choice(
-              key: Key('return-${c.code}'),
-              label: conditionCopy(c),
-              selected: _condition == c,
-              detail: c == ToolCondition.damaged ? damagedAsksOwner : null,
-              onTap: locked ? null : () => setState(() => _condition = c),
-            ),
-          const ToolFieldLabel('Note (optional)'),
-          TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
-          sendArea(sendKey: const Key('tool-send'), onSend: _send),
-          const SizedBox(height: 8),
-          const BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
-        ]),
-      ),
+    const note = BilingualText(officeFixes, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted));
+    return WmPage(
+      title: 'Return',
+      footer: _footerWithNote(sendFooter(sendKey: const Key('tool-send'), onSend: _send), note),
+      children: [
+        _ToolHeader(label: t.label, name: t.name, details: t.details, extra: 'From ${t.holderName ?? '—'} · ${t.folderName ?? ''}'),
+        const ToolFieldLabel('Its condition'),
+        for (final c in ToolCondition.values)
+          _Choice(
+            key: Key('return-${c.code}'),
+            label: conditionCopy(c),
+            selected: _condition == c,
+            detail: c == ToolCondition.damaged ? damagedAsksOwner : null,
+            onTap: locked ? null : () => setState(() => _condition = c),
+          ),
+        const ToolFieldLabel('Note (optional)'),
+        TextField(key: const Key('tool-note'), controller: _note, enabled: !locked, maxLength: _noteMax),
+        ?sendBox(),
+        if (locked) ...[const SizedBox(height: 8), note],
+      ],
     );
   }
 }
@@ -626,24 +634,23 @@ class _UndoRecordScreenState extends State<UndoRecordScreen> with ToolSending {
   @override
   Widget build(BuildContext context) {
     final r = widget.record;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Undo')),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          _ToolHeader(
-              label: r.label,
-              name: r.itemName,
-              extra: '${recordKind(r.kind)}${r.holderName == null ? '' : ' · ${r.holderName}'} · ${recordTime(r.at)}'),
-          const SizedBox(height: 10),
-          const BilingualText(
-              Bilingual('Undo puts the tool back where it was before this record. The record stays in the history, marked Undone.',
-                  'Ibabalik ng undo ang tool sa dati bago ang record na ito. Mananatili ang record sa kasaysayan, may markang Undone.'),
-              style: TextStyle(fontSize: 13, color: WmColors.textSecondary)),
-          const ToolFieldLabel('Why (required)'),
-          TextField(key: const Key('undo-reason'), controller: _reason, enabled: !locked, maxLength: _reasonMax),
-          sendArea(sendKey: const Key('tool-send'), onSend: _send),
-        ]),
-      ),
+    return WmPage(
+      title: 'Undo',
+      footer: sendFooter(sendKey: const Key('tool-send'), onSend: _send),
+      children: [
+        _ToolHeader(
+            label: r.label,
+            name: r.itemName,
+            extra: '${recordKind(r.kind)}${r.holderName == null ? '' : ' · ${r.holderName}'} · ${recordTime(r.at)}'),
+        const SizedBox(height: 10),
+        const BilingualText(
+            Bilingual('Undo puts the tool back where it was before this record. The record stays in the history, marked Undone.',
+                'Ibabalik ng undo ang tool sa dati bago ang record na ito. Mananatili ang record sa kasaysayan, may markang Undone.'),
+            style: TextStyle(fontSize: 13, color: WmColors.textSecondary)),
+        const ToolFieldLabel('Why (required)'),
+        TextField(key: const Key('undo-reason'), controller: _reason, enabled: !locked, maxLength: _reasonMax),
+        ?sendBox(),
+      ],
     );
   }
 }

@@ -107,4 +107,24 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('e1'))).width, tester.getSize(find.byKey(const Key('e2'))).width, reason: 'equal shares');
     expect(tester.getCenter(find.text('Tool')).dx, tester.getCenter(find.byKey(const Key('e2'))).dx, reason: 'label centred');
   });
+
+  testWidgets('a segmented switch: equal segments, the chosen one white and selected, a tap reports its value', (tester) async {
+    final taps = <String>[];
+    await tester.pumpWidget(page(WmSegmented<String>(
+      segments: const [('a', 'Mine (2)', Key('seg-a')), ('b', 'Team', Key('seg-b')), ('c', 'My records', Key('seg-c'))],
+      selected: 'b',
+      onChanged: taps.add,
+    )));
+    final widths = [for (final k in ['seg-a', 'seg-b', 'seg-c']) tester.getSize(find.byKey(Key(k))).width];
+    expect(widths[0], closeTo(widths[1], 0.01));
+    expect(widths[1], closeTo(widths[2], 0.01));
+    expect(materialColor(tester, 'seg-b'), Colors.white);
+    expect(materialColor(tester, 'seg-a'), Colors.transparent);
+    final handle = tester.ensureSemantics();
+    expect(tester.getSemantics(find.byKey(const Key('seg-b'))), containsSemantics(isSelected: true));
+    expect(tester.getSemantics(find.byKey(const Key('seg-a'))), containsSemantics(isSelected: false));
+    handle.dispose();
+    await tester.tap(find.byKey(const Key('seg-c')));
+    expect(taps, ['c']);
+  });
 }

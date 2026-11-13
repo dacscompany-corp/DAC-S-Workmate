@@ -24,6 +24,10 @@ class WmPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final action = this.action;
     final footer = this.footer;
+    // What is left above the keyboard: a tall footer (a refusal over the button,
+    // large text) scrolls inside its share instead of squeezing the fields out.
+    final media = MediaQuery.of(context);
+    final footerMax = (media.size.height - media.viewInsets.bottom) * .45;
     return Scaffold(
       backgroundColor: WmColors.canvas,
       body: SafeArea(
@@ -55,8 +59,8 @@ class WmPage extends StatelessWidget {
           if (footer != null)
             Container(
               decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: WmColors.hairline))),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-              child: footer,
+              constraints: BoxConstraints(maxHeight: footerMax),
+              child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 12), child: footer),
             ),
         ]),
       ),

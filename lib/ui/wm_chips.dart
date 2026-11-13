@@ -151,3 +151,56 @@ class WmChoiceChip extends StatelessWidget {
         ),
       );
 }
+
+/// A switch of a few equal choices: a grey track, the chosen one white
+/// (History's Week / Month, the Tools sheet's Mine / Team / My records).
+/// Each segment is (value, label, key); its key sits on the tappable segment.
+class WmSegmented<T> extends StatelessWidget {
+  const WmSegmented({super.key, required this.segments, required this.selected, required this.onChanged});
+
+  final List<(T value, String label, Key? segmentKey)> segments;
+  final T selected;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(color: WmColors.inert, borderRadius: BorderRadius.circular(999)),
+        child: Row(children: [
+          for (var i = 0; i < segments.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(child: _segment(segments[i].$1, segments[i].$2, segments[i].$3)),
+          ],
+        ]),
+      );
+
+  Widget _segment(T value, String label, Key? segmentKey) {
+    final chosen = value == selected;
+    return Semantics(
+      key: segmentKey,
+      button: true,
+      selected: chosen,
+      child: Material(
+        color: chosen ? Colors.white : Colors.transparent,
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () => onChanged(value),
+          child: SizedBox(
+            height: 38,
+            child: Center(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: chosen ? FontWeight.w800 : FontWeight.w600,
+                    color: chosen ? WmColors.text : WmColors.textMuted,
+                  )),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

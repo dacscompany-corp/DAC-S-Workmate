@@ -126,7 +126,7 @@ void main() {
     await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
     expect(find.textContaining('₱'), findsWidgets);
-    await tester.pageBack();
+    await tester.tap(find.byKey(const Key('wm-sheet-close'))); // the sheet closes with its × (was: page back)
     await tester.pumpAndSettle();
     // The signal goes; the worker opens My agreements again.
     remote
@@ -164,7 +164,8 @@ void main() {
     expect(find.textContaining('Checking your agreements'), findsOneWidget);
     remote.gate!.complete();
     await tester.pumpAndSettle();
-    expect(find.textContaining('₱'), findsNothing, reason: 'an unlinked agreement’s figures after the answer');
+    expect(find.text('₱50,000.00'), findsNothing, reason: 'an unlinked agreement’s figures after the answer (the others stay listed)');
+    expect(find.text('₱30,000.00'), findsNothing);
     expect(find.textContaining('isn’t shown to you any more'), findsOneWidget);
   });
 

@@ -6,6 +6,8 @@ import '../../attendance/ui/status_pill.dart';
 import '../../requests/domain/request_models.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/workplan_api.dart';
 import '../domain/wp_failure.dart';
 import '../domain/wp_task.dart';
@@ -13,11 +15,19 @@ import 'my_work_controller.dart';
 import 'workplan_copy.dart';
 import 'workplan_widgets.dart';
 
-/// A team leader's own proposals (spec §15, decided 13 October 2026): Sent
-/// (still an office draft), Published, or Declined with the office's reason.
-/// A proposal is never live by itself: the office edits, publishes or declines it.
-class ProposalsScreen extends StatelessWidget {
-  const ProposalsScreen({super.key, required this.controller});
+/// Opens My proposals as a sheet (My Work's pill, Home's shortcut). It reads
+/// again as it opens: a sheet has no pull-down.
+Future<void> showProposalsSheet(BuildContext context, MyWorkController controller) {
+  controller.refresh();
+  return showWmSheet<void>(context, builder: (_) => ProposalsSheet(controller: controller));
+}
+
+/// A team leader's own proposals (spec §15, decided 13 October 2026), a sheet
+/// since Phase 5: Sent (still an office draft), Published, or Declined with the
+/// office's reason. A proposal is never live by itself: the office edits,
+/// publishes or declines it.
+class ProposalsSheet extends StatelessWidget {
+  const ProposalsSheet({super.key, required this.controller});
 
   final MyWorkController controller;
 
@@ -26,58 +36,50 @@ class ProposalsScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('My proposals')),
-        body: SafeArea(
-          child: ListenableBuilder(
-            listenable: controller,
-            builder: (context, _) {
-              final view = controller.view;
-              return RefreshIndicator(
-                onRefresh: controller.refresh,
-                child: ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-                  FilledButton.icon(
-                    key: const Key('propose'),
-                    onPressed: () => _propose(context),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Propose a task'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('The office reviews each proposal. Nothing reaches the team until the office publishes it.',
-                      style: TextStyle(color: WmColors.textMuted)),
-                  const SizedBox(height: 12),
-                  for (final op in view.pendingProposals)
-                    WpBox(children: [
-                      Row(children: [
-                        Expanded(child: Text((op.body['title'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w800))),
-                        const StatusPill.brown('Pending sync'),
-                      ]),
-                      Text('${op.body['where'] ?? ''} · Team ${op.body['team_name'] ?? ''}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
-                    ]),
-                  if (view.proposals.isEmpty && view.pendingProposals.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 24),
-                      child: Text('No proposals in the last 90 days.', textAlign: TextAlign.center, style: TextStyle(color: WmColors.textMuted)),
-                    ),
-                  for (final p in view.proposals)
-                    WpBox(key: Key('proposal-${p.id}'), children: [
-                      Row(children: [
-                        Expanded(child: Text(p.title, style: const TextStyle(fontWeight: FontWeight.w800))),
-                        _StatePill(p.state),
-                      ]),
-                      Text('${p.where} · sent ${dayMonth(p.proposedAt)}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
-                      if (p.reason != null && p.reason!.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text('Office: ${p.reason}', style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w700)),
-                      ],
-                      if (p.state == WpProposalState.published)
-                        const Text('If you are on it, it is in My Work.', style: TextStyle(color: WmColors.green, fontSize: 13)),
-                    ]),
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final view = controller.view;
+          return WmSheetFrame(
+            key: const Key('proposals-sheet'),
+            title: 'My proposals',
+            tall: true,
+            children: [
+              WmSheetButton(key: const Key('propose'), label: 'Propose a task', icon: Icons.add, onPressed: () => _propose(context)),
+              const SizedBox(height: 8),
+              const Text('The office reviews each proposal. Nothing reaches the team until the office publishes it.',
+                  style: TextStyle(color: WmColors.textMuted)),
+              const SizedBox(height: 12),
+              for (final op in view.pendingProposals)
+                WpBox(children: [
+                  Row(children: [
+                    Expanded(child: Text((op.body['title'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w800))),
+                    const StatusPill.brown('Pending sync'),
+                  ]),
+                  Text('${op.body['where'] ?? ''} · Team ${op.body['team_name'] ?? ''}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
                 ]),
-              );
-            },
-          ),
-        ),
+              if (view.proposals.isEmpty && view.pendingProposals.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 24),
+                  child: Text('No proposals in the last 90 days.', textAlign: TextAlign.center, style: TextStyle(color: WmColors.textMuted)),
+                ),
+              for (final p in view.proposals)
+                WpBox(key: Key('proposal-${p.id}'), children: [
+                  Row(children: [
+                    Expanded(child: Text(p.title, style: const TextStyle(fontWeight: FontWeight.w800))),
+                    _StatePill(p.state),
+                  ]),
+                  Text('${p.where} · sent ${dayMonth(p.proposedAt)}', style: const TextStyle(color: WmColors.textMuted, fontSize: 13)),
+                  if (p.reason != null && p.reason!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('Office: ${p.reason}', style: const TextStyle(color: WmColors.danger, fontWeight: FontWeight.w700)),
+                  ],
+                  if (p.state == WpProposalState.published)
+                    const Text('If you are on it, it is in My Work.', style: TextStyle(color: WmColors.green, fontSize: 13)),
+                ]),
+            ],
+          );
+        },
       );
 }
 
@@ -132,80 +134,77 @@ class _ProposeFormScreenState extends State<ProposeFormScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Propose a task')),
-        body: SafeArea(
-          child: FutureBuilder<WpChoices>(
-            future: _choices,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-              final choices = snap.data;
-              if (choices == null) {
-                final copy = wpFailureCopy(WpFailure.of(snap.error ?? StateError('no choices')));
-                return Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: FailureNotice(
-                    english: copy.english,
-                    tagalog: copy.tagalog,
-                    actions: [noticeAction(retryLabel, () => setState(() => _choices = widget.controller.api.choices()))],
-                  ),
-                );
-              }
-              if (choices.teams.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Text('You are not leading a team right now, so you cannot propose tasks.', style: TextStyle(color: WmColors.textMuted)),
-                );
-              }
-              _team ??= choices.teams.length == 1 ? choices.teams.single : null;
-              final ok = _team != null && _destination != null && _title.text.trim().isNotEmpty && !_sending;
-              return ListView(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), children: [
-                DropdownButtonFormField<MyTeam>(
-                  key: const Key('propose-team'),
-                  initialValue: _team,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Team'),
-                  items: [for (final t in choices.teams) DropdownMenuItem(value: t, child: Text(t.name))],
-                  onChanged: (t) => setState(() => _team = t),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<Destination>(
-                  key: const Key('propose-destination'),
-                  initialValue: _destination,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Project and work'),
-                  items: [
-                    for (final d in choices.destinations) DropdownMenuItem(value: d, child: Text(d.label, overflow: TextOverflow.ellipsis)),
-                  ],
-                  onChanged: (d) => setState(() => _destination = d),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('propose-title'),
-                  controller: _title,
-                  maxLength: 200,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Task title'),
-                ),
-                TextField(
-                  key: const Key('propose-details'),
-                  controller: _details,
-                  minLines: 3,
-                  maxLines: 8,
-                  maxLength: 2000,
-                  decoration: const InputDecoration(labelText: 'Details (optional)'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(key: const Key('propose-send'), onPressed: ok ? _send : null, child: const Text('Send to the office')),
-                if (choices.fromCache) ...[
-                  const SizedBox(height: 8),
-                  const Text('No signal: these lists are the ones this phone saved.', style: TextStyle(fontSize: 12.5, color: WmColors.brown)),
+  Widget build(BuildContext context) => FutureBuilder<WpChoices>(
+        future: _choices,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const WmPage(title: 'Propose a task', children: [Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator()))]);
+          }
+          final choices = snap.data;
+          if (choices == null) {
+            final copy = wpFailureCopy(WpFailure.of(snap.error ?? StateError('no choices')));
+            return WmPage(title: 'Propose a task', children: [
+              FailureNotice(
+                english: copy.english,
+                tagalog: copy.tagalog,
+                actions: [noticeAction(retryLabel, () => setState(() => _choices = widget.controller.api.choices()))],
+              ),
+            ]);
+          }
+          if (choices.teams.isEmpty) {
+            return const WmPage(title: 'Propose a task', children: [
+              Text('You are not leading a team right now, so you cannot propose tasks.', style: TextStyle(color: WmColors.textMuted)),
+            ]);
+          }
+          _team ??= choices.teams.length == 1 ? choices.teams.single : null;
+          final ok = _team != null && _destination != null && _title.text.trim().isNotEmpty && !_sending;
+          return WmPage(
+            title: 'Propose a task',
+            footer: WmSheetButton(key: const Key('propose-send'), label: 'Send to the office', icon: Icons.send, onPressed: ok ? _send : null, busy: _sending),
+            children: [
+              DropdownButtonFormField<MyTeam>(
+                key: const Key('propose-team'),
+                initialValue: _team,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Team'),
+                items: [for (final t in choices.teams) DropdownMenuItem(value: t, child: Text(t.name))],
+                onChanged: (t) => setState(() => _team = t),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<Destination>(
+                key: const Key('propose-destination'),
+                initialValue: _destination,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Project and work'),
+                items: [
+                  for (final d in choices.destinations) DropdownMenuItem(value: d, child: Text(d.label, overflow: TextOverflow.ellipsis)),
                 ],
+                onChanged: (d) => setState(() => _destination = d),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('propose-title'),
+                controller: _title,
+                maxLength: 200,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Task title'),
+              ),
+              TextField(
+                key: const Key('propose-details'),
+                controller: _details,
+                minLines: 3,
+                maxLines: 8,
+                maxLength: 2000,
+                decoration: const InputDecoration(labelText: 'Details (optional)'),
+              ),
+              if (choices.fromCache) ...[
                 const SizedBox(height: 8),
-                const Text(savedOnPhoneText, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
-              ]);
-            },
-          ),
-        ),
+                const Text('No signal: these lists are the ones this phone saved.', style: TextStyle(fontSize: 12.5, color: WmColors.brown)),
+              ],
+              const SizedBox(height: 8),
+              const Text(savedOnPhoneText, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+            ],
+          );
+        },
       );
 }
