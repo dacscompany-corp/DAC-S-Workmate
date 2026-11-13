@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../purchasing/ui/purchasing_copy.dart' show BilingualText;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/stock_remote.dart';
 import '../data/stock_submitter.dart';
 import '../domain/stock_failure.dart';
@@ -162,28 +163,53 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
 
   String get _title => _isReturn ? 'Return to the warehouse' : (widget.preset.fixed ? 'Issue from stock' : 'Issue or move');
 
+  /// − and +: one more or one less than what is typed (an empty or unreadable
+  /// box counts as 0), never below zero. A typed decimal is kept (2.5 → 3.5).
+  void _step(int by) {
+    if (sending || locked) return;
+    final now = parseStockQty(_qty.text) ?? 0;
+    final next = (now + by) < 0 ? 0.0 : now + by;
+    _qty.value = TextEditingValue(text: qtyText(next), selection: TextSelection.collapsed(offset: qtyText(next).length));
+  }
+
+  /// Send, with the two-language "A mistake?" note under it (pinned footer).
+  /// Null while the choices load or fail, and once locked (the body shows
+  /// the unresolved box and the note instead).
+  Widget? _footer() {
+    if (_choices == null || _loadFailure != null) return null;
+    final send = sendFooter(sendKey: const Key('move-send'), onSend: _send);
+    if (send == null) return null;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      send,
+      const SizedBox(height: 8),
+      const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final choices = _choices;
-    return Scaffold(
-      appBar: AppBar(title: Text(_title)),
-      body: SafeArea(
-        child: _loadFailure != null
-            ? Padding(
-                padding: const EdgeInsets.all(16),
-                child: FailureNotice(
-                  key: const Key('stock-load-failure'),
-                  english: stockFailureCopy(_loadFailure!).english,
-                  tagalog: stockFailureCopy(_loadFailure!).tagalog,
-                  actions: [noticeAction('Try again · Subukan ulit', _loadChoices)],
-                ),
-              )
-            : choices == null
-                ? const Center(child: CircularProgressIndicator())
-                : ListView(padding: const EdgeInsets.all(16), children: _fields(choices)),
-      ),
+    return WmSheetFrame(
+      tall: true,
+      title: _title,
+      footer: _footer(),
+      children: _loadFailure != null
+          ? [
+              FailureNotice(
+                key: const Key('stock-load-failure'),
+                english: stockFailureCopy(_loadFailure!).english,
+                tagalog: stockFailureCopy(_loadFailure!).tagalog,
+                actions: [noticeAction('Try again · Subukan ulit', _loadChoices)],
+              ),
+            ]
+          : choices == null
+              ? const [Padding(padding: EdgeInsets.symmetric(vertical: 32), child: Center(child: CircularProgressIndicator()))]
+              : _fields(choices),
     );
   }
+
+  static OutlineInputBorder _box(Color c) =>
+      OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: c));
 
   List<Widget> _fields(StockChoices choices) {
     final item = _item;
@@ -194,11 +220,12 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
     ];
     final there = widget.overview?.item(_form.itemId)?.at(_form.from);
     final fixed = widget.preset.fixed || _isReturn || locked;
+    final stepsOff = sending || locked;
     return [
       if (_isReturn)
         Text('From ${widget.preset.returnFrom ?? 'the project'}, back to the warehouse. The same lots go back.',
             style: const TextStyle(color: WmColors.textMuted)),
-      const StockFieldLabel('Item'),
+      const _MonoLabel('ITEM'),
       DropdownButtonFormField<String>(
         key: const Key('move-item'),
         initialValue: _form.itemId,
@@ -213,7 +240,7 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
                 }),
       ),
       if (!_isReturn) ...[
-        const StockFieldLabel('From'),
+        const _MonoLabel('FROM'),
         DropdownButtonFormField<String>(
           key: const Key('move-from'),
           initialValue: _form.from,
@@ -221,7 +248,7 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
           items: places,
           onChanged: fixed ? null : (v) => setState(() => _form.from = v ?? warehousePlace),
         ),
-        const StockFieldLabel('To'),
+        const _MonoLabel('TO'),
         DropdownButtonFormField<String>(
           key: const Key('move-to'),
           initialValue: _form.to,
@@ -239,28 +266,46 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
                 },
         ),
       ],
-      const StockFieldLabel('Quantity'),
-      TextField(
-        key: const Key('move-qty'),
-        controller: _qty,
-        enabled: !locked,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          suffixText: unit,
-          helperText: there == null ? null : '${stockQty(there, unit)} there now',
+      const _MonoLabel('QUANTITY'),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _StepButton(key: const Key('move-minus'), icon: Icons.remove, label: 'One less', onTap: stepsOff ? null : () => _step(-1)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: TextField(
+            key: const Key('move-qty'),
+            controller: _qty,
+            enabled: !locked,
+            textAlign: TextAlign.center,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700, fontSize: 20),
+            decoration: InputDecoration(
+              suffixText: unit,
+              helperText: there == null ? null : '${stockQty(there, unit)} there now',
+              // Filled like every other field (the app's field colour); only the buttons beside it are white.
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              border: _box(WmColors.border),
+              enabledBorder: _box(WmColors.border),
+              disabledBorder: _box(WmColors.border),
+              focusedBorder: _box(WmColors.green),
+            ),
+          ),
         ),
-      ),
+        const SizedBox(width: 12),
+        _StepButton(key: const Key('move-plus'), icon: Icons.add, label: 'One more', onTap: stepsOff ? null : () => _step(1)),
+      ]),
       if (_form.toSite) ..._requestFields(),
-      const StockFieldLabel('When'),
+      const _MonoLabel('WHEN'),
       Align(
         alignment: Alignment.centerLeft,
         child: StockDayField(value: _form.on, today: _today, onChanged: locked ? null : (d) => setState(() => _form.on = d)),
       ),
-      const StockFieldLabel('Note (optional)'),
+      const _MonoLabel('NOTE (OPTIONAL)'),
       TextField(key: const Key('move-note'), controller: _note, enabled: !locked, maxLength: 300),
-      sendArea(sendKey: const Key('move-send'), onSend: _send),
-      const SizedBox(height: 8),
-      const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+      ?sendBox(),
+      if (locked) ...[
+        const SizedBox(height: 8),
+        const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+      ],
     ];
   }
 
@@ -269,7 +314,7 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
     final fitting = _fitting;
     final fixedLine = (widget.preset.fixed && _form.requestLineId != null) || locked;
     return [
-      const StockFieldLabel('For a request'),
+      const _MonoLabel('FOR A REQUEST'),
       if (_lines == null && !_linesFailed) const LinearProgressIndicator(),
       if (_linesFailed)
         const BilingualText(stockNeedsSignal, style: TextStyle(fontSize: 13, color: WmColors.danger)),
@@ -294,9 +339,48 @@ class _MoveScreenState extends State<MoveScreen> with StockSending {
           ),
         ),
       if (_form.requestLineId == null) ...[
-        const StockFieldLabel('Why it is needed'),
+        const _MonoLabel('WHY IT IS NEEDED'),
         TextField(key: const Key('move-reason'), controller: _reason, enabled: !locked, maxLength: 300),
       ],
     ];
   }
+}
+
+/// The small mono capital label over a control.
+class _MonoLabel extends StatelessWidget {
+  const _MonoLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 18, bottom: 8), child: Text(text, style: monoLabel));
+}
+
+/// The 52-px − / + button beside the quantity (radius 14, white, green icon).
+class _StepButton extends StatelessWidget {
+  const _StepButton({super.key, required this.icon, required this.label, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        enabled: onTap != null,
+        label: label,
+        excludeSemantics: true,
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Material(
+            color: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: WmColors.border)),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Center(widthFactor: 1, heightFactor: 1, child: Icon(icon, size: 24, color: onTap == null ? WmColors.textDisabled : WmColors.green)),
+            ),
+          ),
+        ),
+      );
 }

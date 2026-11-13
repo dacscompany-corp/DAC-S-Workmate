@@ -152,6 +152,13 @@ void main() {
         .controller
         .text;
 
+    // The supplier now sits below the items: bring it into the sheet's view first.
+    Future<void> reachSupplier(WidgetTester tester) async {
+      final list = find.descendant(of: find.byKey(const Key('record-form')), matching: find.byType(Scrollable)).first;
+      await tester.scrollUntilVisible(find.byKey(const Key('supplier-name')), 200, scrollable: list);
+      await tester.pumpAndSettle();
+    }
+
     Future<void> recordTicked(WidgetTester tester) async {
       await tester.tap(find.byKey(const Key('pick-p1')));
       await tester.pumpAndSettle();
@@ -175,7 +182,19 @@ void main() {
       await tester.tap(find.byKey(const Key('same-items-continue')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('record-form')), findsOneWidget);
+      await reachSupplier(tester);
       expect(supplierTyped(tester), 'ZZ Hardware', reason: 'the earlier draft, supplier and all');
+    });
+
+    testWidgets('Phase 6b: Continue is a rounded green button, Start a new one a green text button', (tester) async {
+      api.draftList = [earlier()];
+      await open(tester);
+      await recordTicked(tester);
+      final cont = tester.widget<FilledButton>(find.byKey(const Key('same-items-continue')));
+      final shape = cont.style!.shape!.resolve({})! as RoundedRectangleBorder;
+      expect(shape.borderRadius, BorderRadius.circular(14));
+      expect(cont.style!.backgroundColor!.resolve({}), WmColors.green);
+      expect(tester.widget<TextButton>(find.byKey(const Key('same-items-new'))).style!.foregroundColor!.resolve({}), WmColors.green);
     });
 
     testWidgets('Start a new one opens a new purchase; closing the question opens nothing', (tester) async {
@@ -185,8 +204,9 @@ void main() {
       await tester.tap(find.byKey(const Key('same-items-new')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('record-form')), findsOneWidget);
+      await reachSupplier(tester);
       expect(supplierTyped(tester), '');
-      await tester.pageBack();
+      await tester.tap(find.byKey(const Key('wm-sheet-close'))); // the sheet's cross (was the page's back arrow)
       await tester.pumpAndSettle();
 
       await recordTicked(tester);
@@ -194,6 +214,36 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('same-items-dialog')), findsNothing);
       expect(find.byKey(const Key('record-form')), findsNothing);
+    });
+  });
+
+  // Phase 6b: Buying is off takes the page look, as a root screen (no back button).
+  group('Phase 6b: Buying is off in the page look', () {
+    testWidgets('title in the page style, no back button, no app bar; the same words and Log out', (tester) async {
+      var out = 0;
+      await tester.pumpWidget(wrap(BuyingOffScreen(onRetry: () {}, onSignOut: () => out++, unsent: 1)));
+      expect(find.byKey(const Key('wm-page-back')), findsNothing);
+      expect(find.byType(AppBar), findsNothing);
+      final title = tester.widget<Text>(find.text('Buying'));
+      expect([title.style!.fontSize, title.style!.fontWeight], [24, FontWeight.w800]);
+      expect(tester.getTopLeft(find.text('Buying')).dx, 20, reason: 'the page\'s 20-px sides');
+      expect(find.byKey(const Key('buying-off-unsent')), findsOneWidget);
+      expect(find.text('TRY AGAIN'), findsOneWidget);
+      await tester.tap(find.text('Log out'));
+      expect(out, 1);
+    });
+
+    testWidgets('320 x 568 at text scale 1.3 raises no exception', (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(wrap(BuyingOffScreen(onRetry: () {}, onSignOut: () {}, unsent: 3)));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(find.text('Log out'), 100);
+      expect(find.text('Log out'), findsOneWidget);
     });
   });
 

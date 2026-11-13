@@ -5,12 +5,17 @@ import 'package:flutter/material.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/purchasing_api.dart';
 import '../domain/pay_models.dart';
 import '../domain/pur_failure.dart';
 import '../purchasing_services.dart';
 import '../ui/pay_copy.dart';
 import '../ui/purchasing_copy.dart';
+
+/// An amount in the mono style, as on the My purchases cards.
+const _mono = TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700);
 
 /// Report a return (0102, Q17): petty cash handed back to the owner. It waits
 /// for the owner's confirmation, which alone lowers cash held — on the day
@@ -112,14 +117,19 @@ class _ReportReturnScreenState extends State<ReportReturnScreen> {
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
-    child: Scaffold(
-      appBar: AppBar(
-        title: const BilingualText(reportReturnLabel, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+    child: WmPage(
+      title: reportReturnLabel.english,
+      footer: WmSheetButton(
+        key: const Key('return-save'),
+        label: reportReturnLabel.english,
+        tagalog: reportReturnLabel.tagalog,
+        icon: Icons.check,
+        busy: _saving,
+        onPressed: _save,
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
+      children: [
+        Text(reportReturnLabel.tagalog, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
+        const SizedBox(height: 10),
             const BilingualText(
               Bilingual(
                 'It waits for the owner. Only the owner\'s confirmation lowers your cash held.',
@@ -127,7 +137,11 @@ class _ReportReturnScreenState extends State<ReportReturnScreen> {
               ),
               style: TextStyle(fontSize: 13, color: WmColors.textSecondary),
             ),
-            if (widget.held != null) Text('You hold ${peso(widget.held!)} on record.', style: const TextStyle(color: WmColors.textMuted)),
+            if (widget.held != null)
+              Text.rich(
+                TextSpan(children: [const TextSpan(text: 'You hold '), TextSpan(text: peso(widget.held!), style: _mono), const TextSpan(text: ' on record.')]),
+                style: const TextStyle(color: WmColors.textMuted),
+              ),
             if (_notice != null) ...[const SizedBox(height: 10), FailureNotice(english: _notice!.english, tagalog: _notice!.tagalog)],
             const SizedBox(height: 14),
             TextField(
@@ -196,11 +210,8 @@ class _ReportReturnScreenState extends State<ReportReturnScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            bilingualButton(reportReturnLabel, _saving ? null : _save, filled: true, key: const Key('return-save')),
-          ],
-        ),
-      ),
+        const SizedBox(height: 8),
+      ],
     ),
   );
 }

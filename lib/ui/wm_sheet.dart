@@ -34,6 +34,7 @@ class WmSheetFrame extends StatefulWidget {
     this.tall = false,
     required this.children,
     this.footer,
+    this.action,
   });
 
   final String title;
@@ -46,6 +47,10 @@ class WmSheetFrame extends StatefulWidget {
   final bool tall;
   final List<Widget> children;
   final Widget? footer;
+
+  /// A small button laid out immediately left of the close button (Record
+  /// purchase's bin).
+  final Widget? action;
 
   @override
   State<WmSheetFrame> createState() => _WmSheetFrameState();
@@ -134,6 +139,7 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
                         ]),
                       ),
                     ),
+                    ?widget.action,
                     const SizedBox(width: 4),
                     WmRoundButton(key: const Key('wm-sheet-close'), icon: Icons.close, label: 'Close', onTap: _close),
                   ]),

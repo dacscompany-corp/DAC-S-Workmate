@@ -8,7 +8,7 @@ import '../attendance/fakes.dart' show useTallPhone;
 void main() {
   late int sends;
 
-  Widget host({Widget? footer}) => MaterialApp(
+  Widget host({Widget? footer, Widget? action}) => MaterialApp(
         theme: workMateTheme(),
         home: Scaffold(
           body: Builder(
@@ -16,7 +16,7 @@ void main() {
               child: TextButton(
                 onPressed: () => showWmSheet<void>(
                   context,
-                  builder: (_) => WmSheetFrame(title: 'Sheet', subtitle: 'Tagalog line', footer: footer, children: const [Text('Body')]),
+                  builder: (_) => WmSheetFrame(title: 'Sheet', subtitle: 'Tagalog line', footer: footer, action: action, children: const [Text('Body')]),
                 ),
                 child: const Text('open'),
               ),
@@ -25,10 +25,10 @@ void main() {
         ),
       );
 
-  Future<void> open(WidgetTester tester, {Widget? footer}) async {
+  Future<void> open(WidgetTester tester, {Widget? footer, Widget? action}) async {
     useTallPhone(tester);
     sends = 0;
-    await tester.pumpWidget(host(footer: footer));
+    await tester.pumpWidget(host(footer: footer, action: action));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     expect(find.text('Body'), findsOneWidget);
@@ -40,6 +40,18 @@ void main() {
     await open(tester);
     expect(find.text('Sheet'), findsOneWidget);
     expect(find.text('Tagalog line'), findsOneWidget);
+  });
+
+  testWidgets('an action sits immediately left of the close button', (tester) async {
+    await open(tester, action: WmRoundButton(key: const Key('the-action'), icon: Icons.delete_outline, label: 'Throw away', onTap: () => sends++));
+    final action = tester.getRect(find.byKey(const Key('the-action')));
+    final close = tester.getRect(find.byKey(const Key('wm-sheet-close')));
+    expect(action.right, lessThanOrEqualTo(close.left + 0.01));
+    expect(close.left - action.right, lessThan(8), reason: 'immediately left, not elsewhere');
+    expect((action.center.dy - close.center.dy).abs(), lessThan(0.5));
+    await tester.tap(find.byKey(const Key('the-action')));
+    expect(sends, 1);
+    expect(find.text('Body'), findsOneWidget, reason: 'the action does not close the sheet');
   });
 
   testWidgets('a short, slow drag springs back', (tester) async {

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/purchasing_api.dart';
 import '../domain/pay_models.dart';
 import '../domain/pur_failure.dart';
@@ -32,6 +34,9 @@ Future<bool> openRecordPayment(
       ),
     ) ==
     true;
+
+/// An amount in the mono style, as on the My purchases cards.
+const _mono = TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700);
 
 class RecordPaymentScreen extends StatefulWidget {
   const RecordPaymentScreen({super.key, required this.services, required this.purchaseId, required this.supplier, this.supplierId, required this.left});
@@ -152,20 +157,28 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
     final over = _source == 'petty_cash' && figures != null ? overspendBy(_amount.text, figures.held) : null;
     return PopScope(
       canPop: !_saving,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const BilingualText(recordPaymentLabel, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+      child: WmPage(
+        key: const Key('pay-form'),
+        title: recordPaymentLabel.english,
+        footer: WmSheetButton(
+          key: const Key('pay-save'),
+          label: recordPaymentLabel.english,
+          tagalog: recordPaymentLabel.tagalog,
+          icon: Icons.check,
+          busy: _saving,
+          onPressed: _save,
         ),
-        body: SafeArea(
-          child: ListView(
-            key: const Key('pay-form'),
-            padding: const EdgeInsets.all(16),
-            children: [
+        children: [
+              Text(recordPaymentLabel.tagalog, style: const TextStyle(fontSize: 13, color: WmColors.textMuted)),
+              const SizedBox(height: 10),
               Text(widget.supplier.isEmpty ? 'No supplier' : widget.supplier, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              Text(
-                widget.left > 0 ? '${peso(widget.left)} left to pay' : 'Nothing left to pay — a payment now is over the receipt.',
-                style: const TextStyle(color: WmColors.textMuted),
-              ),
+              if (widget.left > 0)
+                Text.rich(
+                  TextSpan(children: [TextSpan(text: peso(widget.left), style: _mono), const TextSpan(text: ' left to pay')]),
+                  style: const TextStyle(color: WmColors.textMuted),
+                )
+              else
+                const Text('Nothing left to pay — a payment now is over the receipt.', style: TextStyle(color: WmColors.textMuted)),
               const Text(
                 'Saved on this phone. It is sent when there is signal. A payment never changes Spent.',
                 style: TextStyle(fontSize: 12.5, color: WmColors.textMeta),
@@ -271,11 +284,8 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              bilingualButton(recordPaymentLabel, _saving ? null : _save, filled: true, key: const Key('pay-save')),
+              const SizedBox(height: 8),
             ],
-          ),
-        ),
       ),
     );
   }

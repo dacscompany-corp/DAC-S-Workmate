@@ -4,6 +4,8 @@ import '../../attendance/domain/work_date.dart';
 import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
+import '../../ui/wm_sheet.dart';
 import '../data/purchasing_api.dart';
 import '../domain/correction.dart';
 import '../domain/pur_failure.dart';
@@ -101,10 +103,34 @@ class _CorrectScreenState extends State<CorrectScreen> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const BilingualText(Bilingual('Correct purchase', 'Itama ang purchase'), style: TextStyle(fontWeight: FontWeight.w800))),
-      body: SafeArea(
-        child: ListView(key: const Key('correct-form'), padding: const EdgeInsets.all(16), children: [
+    return WmPage(
+      title: 'Correct purchase',
+      footer: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // The first problem, repeated over the pinned button in its own words.
+        if (problems.isNotEmpty) ...[
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              key: const Key('correct-first-problem'),
+              '${correctionProblemCopy(problems.first.$1).english} · ${correctionProblemCopy(problems.first.$1).tagalog}',
+              style: const TextStyle(color: WmColors.danger, fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        WmSheetButton(
+          key: const Key('correct-save'),
+          label: 'Save correction',
+          tagalog: 'I-save ang pagtatama',
+          icon: Icons.check,
+          busy: _busy,
+          onPressed: _save,
+        ),
+      ]),
+      children: [
+        Column(key: const Key('correct-form'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Itama ang purchase', style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
+          const SizedBox(height: 10),
           if (_notice != null) ...[FailureNotice(english: _notice!.english, tagalog: _notice!.tagalog), const SizedBox(height: 10)],
           InkWell(
             key: const Key('correct-date'),
@@ -178,7 +204,13 @@ class _CorrectScreenState extends State<CorrectScreen> {
             decoration: const InputDecoration(labelText: 'Total on the receipt', prefixText: '₱ '),
             onChanged: (v) => _set(_c.copyWith(receiptTotal: v)),
           ),
-          Text('Items + fees − discounts: ${peso(_c.computedTotal(_p))}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text.rich(
+            TextSpan(children: [
+              const TextSpan(text: 'Items + fees − discounts: '),
+              TextSpan(text: peso(_c.computedTotal(_p)), style: const TextStyle(fontFamily: 'IBM Plex Mono')),
+            ]),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 10),
           TextFormField(
             key: const Key('correct-reason'),
@@ -187,10 +219,8 @@ class _CorrectScreenState extends State<CorrectScreen> {
             onChanged: (v) => _set(_c.copyWith(reason: v)),
           ),
           for (final x in problems.where((x) => x.$2 == null)) problem(x),
-          const SizedBox(height: 18),
-          bilingualButton(const Bilingual('Save correction', 'I-save ang pagtatama'), _busy ? null : _save, filled: true, key: const Key('correct-save')),
         ]),
-      ),
+      ],
     );
   }
 }

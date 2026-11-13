@@ -4,6 +4,7 @@ import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../requests/domain/quantity.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
 import '../data/purchasing_api.dart';
 import '../domain/pay_models.dart';
 import '../domain/pur_failure.dart';
@@ -14,6 +15,22 @@ import '../ui/pay_copy.dart';
 import '../ui/pay_widgets.dart';
 import '../ui/purchasing_copy.dart';
 import 'correct_screen.dart';
+
+/// An amount in the mono style, as on the My purchases cards.
+const _mono = TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700);
+
+/// [text] with each peso amount in the mono style; the plain text is unchanged.
+Widget _money(String text, {TextStyle? style, TextAlign? textAlign}) {
+  final spans = <InlineSpan>[];
+  var at = 0;
+  for (final m in RegExp(r'₱[\d,]+\.\d{2}').allMatches(text)) {
+    if (m.start > at) spans.add(TextSpan(text: text.substring(at, m.start)));
+    spans.add(TextSpan(text: m.group(0), style: _mono));
+    at = m.end;
+  }
+  if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
+  return Text.rich(TextSpan(children: spans), style: style, textAlign: textAlign);
+}
 
 /// One purchase in full (Q12): lines, fees, receipts and where it stands.
 /// The buyer may correct their own recorded purchase here (Q13); voiding
@@ -98,6 +115,8 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
   }
 
   Future<void> _recordPayment(PurchaseDetail p, PurchasePayments pay) async {
+    // An earlier "Saved" snack bar must not float over the new page's pinned Save button.
+    ScaffoldMessenger.of(context).clearSnackBars();
     final queued = await openRecordPayment(context, widget.services,
         purchaseId: p.id, supplier: p.supplier, supplierId: pay.supplierId ?? p.supplierId, left: pay.pay.leftAfter(_unsent));
     if (!queued || !mounted) return;
@@ -149,7 +168,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
         const Expanded(child: BilingualText(paymentsLabel)),
         PayPill(s.state),
       ]),
-      Text(
+      _money(
         s.state == 'not_tracked'
             ? 'Recorded before payments were tracked.'
             : s.state == 'overpaid'
@@ -166,7 +185,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
         ListTile(
           key: Key('payment-queued-${q.opId}'),
           contentPadding: EdgeInsets.zero,
-          title: Text(peso(q.amount)),
+          title: _money(peso(q.amount)),
           subtitle: Text([
             paySourceCopy(q.source).english,
             switch (q.state) {
@@ -182,7 +201,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
           key: Key('payment-${x.id}'),
           contentPadding: EdgeInsets.zero,
           leading: x.proofUrl.isEmpty ? null : SizedBox(width: 48, height: 48, child: _Receipt(url: x.proofUrl, services: widget.services)),
-          title: Text('${peso(x.amount)} · ${x.paidOn}', style: TextStyle(decoration: x.voided ? TextDecoration.lineThrough : null)),
+          title: _money('${peso(x.amount)} · ${x.paidOn}', style: TextStyle(decoration: x.voided ? TextDecoration.lineThrough : null)),
           subtitle: Text([
             paySourceCopy(x.source).english,
             if (x.source != 'credit') payMethodLabel(x.method),
@@ -220,35 +239,30 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Purchase')),
-        body: SafeArea(
-          child: _error != null && p == null
-              ? ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    FailureNotice(english: _error!.english, tagalog: _error!.tagalog, actions: [noticeAction('Try again · Subukan ulit', _load)]),
-                    // F2 (0.8.1): what still works with no signal.
-                    if (_offline) ...[
-                      const SizedBox(height: 12),
-                      const BilingualText(payFromListHint, key: Key('detail-offline-hint'), style: TextStyle(fontSize: 13.5, color: WmColors.textSecondary)),
-                    ],
-                  ],
-                )
-              : p == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : _body(p),
-        ),
+      child: WmPage(
+        title: 'Purchase',
+        children: _error != null && p == null
+            ? [
+                FailureNotice(english: _error!.english, tagalog: _error!.tagalog, actions: [noticeAction('Try again · Subukan ulit', _load)]),
+                // F2 (0.8.1): what still works with no signal.
+                if (_offline) ...[
+                  const SizedBox(height: 12),
+                  const BilingualText(payFromListHint, key: Key('detail-offline-hint'), style: TextStyle(fontSize: 13.5, color: WmColors.textSecondary)),
+                ],
+              ]
+            : p == null
+                ? const [Padding(padding: EdgeInsets.only(top: 48), child: Center(child: CircularProgressIndicator()))]
+                : _body(p),
       ),
     );
   }
 
-  Widget _body(PurchaseDetail p) {
+  List<Widget> _body(PurchaseDetail p) {
     final canCorrect = p.recorded && !p.waitingForOwner && p.replacedBy == null;
-    return ListView(padding: const EdgeInsets.all(16), children: [
+    return [
       Row(children: [
         Expanded(child: Text(p.supplier.isEmpty ? 'No supplier' : p.supplier, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20))),
-        Text(peso(p.receiptTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+        _money(peso(p.receiptTotal), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
       ]),
       Text('${p.purchaseDate} · bought by ${p.boughtByName}${p.paymentMethod.isEmpty ? '' : ' · ${p.paymentMethod}'}',
           style: const TextStyle(color: WmColors.textMuted)),
@@ -261,8 +275,9 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       ]),
       const SizedBox(height: 14),
       for (final l in p.lines)
-        Card(
-          color: Colors.white,
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: WmColors.border)),
           child: ListTile(
             title: Text(l.itemName, style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text([
@@ -272,14 +287,14 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
               if (l.unplannedReason.isNotEmpty) 'no request: ${l.unplannedReason}',
               if (l.extra > 0) 'extra ${formatQuantity(l.extra)}',
             ].join(' · ')),
-            trailing: Text(peso(l.amount)),
+            trailing: _money(peso(l.amount)),
           ),
         ),
       for (final c in p.charges)
         ListTile(
           dense: true,
           title: Text(c.kind == 'delivery_fee' ? 'Delivery fee' : 'Discount'),
-          trailing: Text('${c.kind == 'discount' ? '−' : ''}${peso(c.amount)}'),
+          trailing: _money('${c.kind == 'discount' ? '−' : ''}${peso(c.amount)}'),
         ),
       const SizedBox(height: 12),
       const Text('Receipt photos', style: TextStyle(fontWeight: FontWeight.w800)),
@@ -299,7 +314,7 @@ class _PurchaseDetailScreenState extends State<PurchaseDetailScreen> {
       if (canCorrect) bilingualButton(const Bilingual('Correct this purchase', 'Itama ang purchase'), () => _correct(p), key: const Key('correct')),
       const SizedBox(height: 8),
       const Text('A purchase is voided on Dacs Web only.', style: TextStyle(fontSize: 12.5, color: WmColors.textMeta)),
-    ]);
+    ];
   }
 }
 

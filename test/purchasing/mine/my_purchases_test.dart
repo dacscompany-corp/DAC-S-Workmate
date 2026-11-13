@@ -238,7 +238,7 @@ void main() {
 
     Future<void> scrollTo(WidgetTester tester, Finder f) async {
       await tester.scrollUntilVisible(f, 200,
-          scrollable: find.descendant(of: find.byKey(const Key('correct-form')), matching: find.byType(Scrollable)).first);
+          scrollable: find.ancestor(of: find.byKey(const Key('correct-form')), matching: find.byType(Scrollable)).first);
       await tester.ensureVisible(f);
       await tester.pumpAndSettle();
     }
@@ -293,7 +293,9 @@ void main() {
       await tester.enterText(find.byKey(const Key('correct-reason')), 'Price');
       await scrollTo(tester, find.byKey(const Key('correct-save')));
       await tester.tap(find.byKey(const Key('correct-save')));
-      await tester.pumpAndSettle();
+      // The footer button shows its spinner while the question is open, so the page never "settles": pump a moment instead.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('Send to the owner?'), findsOneWidget);
       await tester.tap(find.byKey(const Key('send-owner')));
       await tester.pumpAndSettle();
@@ -312,6 +314,128 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('cproblem-reasonRequired-0')), findsOneWidget);
       expect(api.calls.where((x) => x.startsWith('correct:')), isEmpty);
+    });
+
+    // Phase 6b: Purchase and Correct purchase take the WmPage look (layout only).
+    group('Phase 6b: the new look', () {
+      Finder inList(Key k) => find.descendant(of: find.byType(ListView), matching: find.byKey(k));
+      Finder inFooter(Key k) => find.descendant(of: find.byType(SingleChildScrollView), matching: find.byKey(k));
+
+      bool? result;
+      var closed = false;
+
+      /// Opens the purchase from a button, remembering what it pops.
+      Future<void> openCapture(WidgetTester tester, {bool small = false}) async {
+        result = null;
+        closed = false;
+        if (small) {
+          tester.view.physicalSize = const Size(320, 568);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.reset);
+          tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        } else {
+          useTallPhone(tester);
+        }
+        await tester.pumpWidget(MaterialApp(
+          theme: workMateTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  result = await Navigator.of(context).push<bool>(MaterialPageRoute<bool>(builder: (_) => PurchaseDetailScreen(purchaseId: 'pu1', services: services)));
+                  closed = true;
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('Purchase: a round back button and the title; Correct stays in the body, never in a footer', (tester) async {
+        await openCapture(tester);
+        expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+        expect(find.byType(AppBar), findsNothing);
+        expect(find.text('Purchase'), findsOneWidget);
+        expect(inList(const Key('correct')), findsOneWidget);
+        expect(inFooter(const Key('correct')), findsNothing);
+        expect(find.text('Cement'), findsOneWidget);
+      });
+
+      testWidgets('Back with nothing changed still pops false', (tester) async {
+        await openCapture(tester);
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pumpAndSettle();
+        expect(closed, isTrue);
+        expect(result, isFalse);
+      });
+
+      testWidgets('Back after a correction still pops true', (tester) async {
+        await openCapture(tester);
+        await tester.tap(find.byKey(const Key('correct')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('correct-qty-1')), '11');
+        await scrollTo(tester, find.byKey(const Key('correct-reason')));
+        await tester.enterText(find.byKey(const Key('correct-reason')), 'Typo');
+        await tester.tap(find.byKey(const Key('correct-save')));
+        await tester.pumpAndSettle();
+        expect(find.byType(PurchaseDetailScreen), findsOneWidget);
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pumpAndSettle();
+        expect(closed, isTrue);
+        expect(result, isTrue);
+      });
+
+      testWidgets('Correct purchase: back, both titles, Save pinned in the footer; the form and its fields stay', (tester) async {
+        await openCapture(tester);
+        await tester.tap(find.byKey(const Key('correct')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+        expect(find.byType(AppBar), findsNothing);
+        expect(find.text('Correct purchase'), findsWidgets);
+        expect(find.text('Itama ang purchase'), findsWidgets);
+        expect(find.byKey(const Key('correct-form')), findsOneWidget);
+        expect(inFooter(const Key('correct-save')), findsOneWidget);
+        expect(inList(const Key('correct-save')), findsNothing);
+        for (final k in ['correct-date', 'correct-supplier', 'correct-qty-1', 'correct-amount-1', 'correct-total', 'correct-reason']) {
+          await scrollTo(tester, find.byKey(Key(k)));
+          expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+        }
+        expect(find.text('Items + fees − discounts: ₱440.00'), findsOneWidget);
+      });
+
+      testWidgets('Correct purchase: a problem shows by its field; Save in the footer sends the same body', (tester) async {
+        await openCapture(tester);
+        await tester.tap(find.byKey(const Key('correct')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('correct-save')));
+        await tester.pumpAndSettle();
+        await scrollTo(tester, find.byKey(const Key('cproblem-reasonRequired-0')));
+        expect(tester.getTopLeft(find.byKey(const Key('cproblem-reasonRequired-0'))).dy, greaterThan(tester.getTopLeft(find.byKey(const Key('correct-reason'))).dy));
+        expect(api.calls.where((x) => x.startsWith('correct:')), isEmpty);
+        await scrollTo(tester, find.byKey(const Key('correct-qty-1')));
+        await tester.enterText(find.byKey(const Key('correct-qty-1')), '12');
+        await scrollTo(tester, find.byKey(const Key('correct-reason')));
+        await tester.enterText(find.byKey(const Key('correct-reason')), 'Counted again');
+        await tester.tap(find.byKey(const Key('correct-save')));
+        await tester.pumpAndSettle();
+        expect(api.calls.where((x) => x.startsWith('correct:')), ['correct:pu1:Counted again:']);
+        expect(((api.bodies.single['lines'] as List).first as Map)['quantity'], 12);
+      });
+
+      testWidgets('320 x 568 at text scale 1.3: Purchase and Correct purchase raise no exception', (tester) async {
+        await openCapture(tester, small: true);
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(find.byKey(const Key('correct')), 200);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('correct')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('correct-save')), findsOneWidget);
+      });
     });
   });
 }

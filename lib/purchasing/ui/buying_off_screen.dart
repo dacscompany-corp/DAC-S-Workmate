@@ -17,11 +17,14 @@ class BuyingOffScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+        backgroundColor: WmColors.canvas,
+        // The page look of WmPage (24 / 800 title, 20-px sides) without its back
+        // button: this is a root screen, there is nothing to go back to.
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Text('Buying', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 23)),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+            children: [
+              Semantics(header: true, child: const Text('Buying', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.2))),
               const SizedBox(height: 16),
               const FailureNotice(
                 english: 'Buying is turned off for your account. Ask the owner if this is a mistake.',
@@ -34,7 +37,6 @@ class BuyingOffScreen extends StatelessWidget {
                   unsent == 1
                       ? '1 purchase not sent yet stays on this phone. It can be sent if buying is turned on again.'
                       : '$unsent purchases not sent yet stay on this phone. They can be sent if buying is turned on again.',
-                  textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 14, color: WmColors.textSecondary),
                 ),
               ],
@@ -42,7 +44,7 @@ class BuyingOffScreen extends StatelessWidget {
               FilledButton(onPressed: onRetry, child: const Text('TRY AGAIN')),
               const SizedBox(height: 8),
               TextButton(onPressed: onSignOut, child: const Text('Log out')),
-            ]),
+            ],
           ),
         ),
       );

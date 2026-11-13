@@ -93,8 +93,7 @@ class _ReceiveSheetState extends State<ReceiveSheet> with StockSending {
               style: const TextStyle(fontFamily: 'IBM Plex Mono', fontWeight: FontWeight.w700, fontSize: 20),
               decoration: InputDecoration(
                 suffixText: l.unit,
-                filled: true,
-                fillColor: Colors.white,
+                // Filled like every other field (the app's field colour); only the buttons beside it are white.
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                 border: _box(WmColors.border),
                 enabledBorder: _box(WmColors.border),

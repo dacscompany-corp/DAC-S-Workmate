@@ -71,12 +71,20 @@ Future<void> pick(WidgetTester tester, String dropdownKey, String text) async {
 }
 
 /// The forms are lazily built lists: scroll the button into the built range first.
+/// The list to scroll: the open sheet's own when there is one (the tab behind it also scrolls).
+Finder formScrollable() {
+  final inSheet = find.descendant(of: find.byType(WmSheetFrame), matching: find.byType(Scrollable));
+  return inSheet.evaluate().isNotEmpty ? inSheet.first : find.byType(Scrollable).first;
+}
+
 Future<void> press(WidgetTester tester, String key) async {
-  final f = find.byKey(Key(key));
-  if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, 300, scrollable: find.byType(Scrollable).first);
+  // With a sheet open, the key is looked up inside the sheet (the tab behind may show the same keyed widget).
+  final sheetOpen = find.byType(WmSheetFrame).evaluate().isNotEmpty;
+  final f = sheetOpen ? find.descendant(of: find.byType(WmSheetFrame), matching: find.byKey(Key(key))) : find.byKey(Key(key));
+  if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, 300, scrollable: formScrollable());
   await tester.ensureVisible(f);
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(Key(key)));
+  await tester.tap(f);
   await tester.pumpAndSettle();
 }
 
@@ -181,7 +189,7 @@ void main() {
       await openShell(tester);
       final before = api.calls.where((c) => c == 'shoppingList').length;
       await press(tester, 'issue-stock-p1');
-      expect(find.text('Issue from stock'), findsOneWidget);
+      expect(find.descendant(of: find.byType(WmSheetFrame), matching: find.text('Issue from stock')), findsOneWidget);
       expect(tester.widget<TextField>(find.byKey(const Key('move-qty'))).controller!.text, '6');
       expect(find.byKey(const Key('move-reason')), findsNothing, reason: 'it fills the request line');
       await press(tester, 'move-send');
@@ -315,6 +323,7 @@ void main() {
       await press(tester, 'move-send');
       expect(find.text(stockFailureCopy(StockFailure.unplannedReasonRequired).english), findsOneWidget);
       expect(stock.attempts, isEmpty);
+      await tester.scrollUntilVisible(find.byKey(const Key('move-reason')), 200, scrollable: formScrollable());
       await tester.enterText(find.byKey(const Key('move-reason')), 'Extra for the gate');
       await press(tester, 'move-send');
       final body = stock.writes.single.$2['p_body'] as Map<String, dynamic>;
@@ -341,16 +350,17 @@ void main() {
     /// Whether a field takes input — scrolled back into the built part of the form first.
     Future<bool> fieldOn(WidgetTester tester, String key) async {
       final f = find.byKey(Key(key));
-      if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, -300, scrollable: find.byType(Scrollable).first);
+      if (f.evaluate().isEmpty) await tester.scrollUntilVisible(f, -300, scrollable: formScrollable());
       return tester.widget<TextField>(f).enabled ?? true;
     }
 
     testWidgets('a lost answer locks the form: nothing can change; Send again sends the saved payload unchanged', (tester) async {
       await openStock(tester);
       await issueLost(tester);
-      expect(find.text(notSureLabel.english), findsOneWidget);
-      expect(find.text(stockFailureCopy(StockFailure.noConnection).english), findsOneWidget);
-      expect(find.text('Issue or move'), findsOneWidget, reason: 'the form stays, locked');
+      Finder inSheet(Finder f) => find.descendant(of: find.byType(WmSheetFrame), matching: f);
+      expect(inSheet(find.text(notSureLabel.english)), findsOneWidget);
+      expect(inSheet(find.text(stockFailureCopy(StockFailure.noConnection).english)), findsOneWidget);
+      expect(inSheet(find.text('Issue or move')), findsOneWidget, reason: 'the form stays, locked');
       expect([await fieldOn(tester, 'move-qty'), await fieldOn(tester, 'move-note')], [false, false], reason: 'the quantity cannot be changed');
       expect(tester.widget<DropdownButtonFormField<String>>(find.byKey(const Key('move-to'))).onChanged, isNull);
       expect(find.byKey(const Key('move-send')), findsNothing, reason: 'no Send of the form — only Send again, Check or Cancel');
@@ -420,7 +430,7 @@ void main() {
     testWidgets('closing the form keeps it: the Stock tab shows it, nothing new starts, Send again from there', (tester) async {
       await openStock(tester);
       await issueLost(tester);
-      await tester.pageBack();
+      await tester.tap(find.byKey(const Key('wm-sheet-close')));
       await tester.pumpAndSettle();
       final op = stock.attempts.single.$1;
       expect(find.byKey(Key('unsure-$op')), findsOneWidget);
@@ -676,6 +686,257 @@ void main() {
       expect(find.byKey(const Key('receive-send')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('the quantity box is filled like every other field (the same fill as the note)', (tester) async {
+      await openStock(tester);
+      await openReceive(tester);
+      final box = tester.widget<InputDecorator>(find.descendant(of: find.byKey(const Key('receive-qty')), matching: find.byType(InputDecorator))).decoration;
+      final note = tester.widget<InputDecorator>(find.descendant(of: find.byKey(const Key('receive-note')), matching: find.byType(InputDecorator))).decoration;
+      expect(box.filled, isTrue);
+      expect(box.fillColor, WmColors.field);
+      expect(box.fillColor, note.fillColor, reason: 'the same fill as the note field');
+    });
+  });
+
+  group('Issue / move sheet and Record leftovers page (Phase 6b)', () {
+    late StockController controller;
+    late StockSubmitter submitter;
+
+    Future<void> openStock(WidgetTester tester, {Size? size, double scale = 1}) async {
+      if (size == null) {
+        useTallPhone(tester);
+      } else {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+      }
+      controller = StockController(remote: stock);
+      await controller.refresh();
+      submitter = StockSubmitter(remote: stock, store: MemoryStockPendingStore(), now: () => DateTime.utc(2026, 10, 27, 2));
+      await submitter.load('s1');
+      await tester.pumpWidget(MaterialApp(
+        theme: workMateTheme(),
+        builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)), child: child!),
+        home: Scaffold(body: StockScreen(controller: controller, submitter: submitter)),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Finder inSheet(Finder f) => find.descendant(of: find.byType(WmSheetFrame), matching: f);
+    Finder inSheetBody(Finder f) => find.descendant(of: inSheet(find.byType(ListView)), matching: f);
+    String qty(WidgetTester tester) => tester.widget<TextField>(find.byKey(const Key('move-qty'))).controller!.text;
+
+    Future<void> openIssue(WidgetTester tester) async {
+      await press(tester, 'stock-issue');
+      await pick(tester, 'move-item', cement.label);
+    }
+
+    Future<void> openLeftovers(WidgetTester tester) async {
+      stock.projectLinesAnswer = {
+        'f-barlin': [
+          StockLine.fromJson(const {
+            'purchase_id': 'p-9', 'line_no': 2, 'destination': 'project', 'folder_id': 'f-barlin', 'item_name': 'Cement',
+            'unit': 'bag', 'quantity': 20, 'purchase_date': '2026-10-22', 'entered': 5,
+            'match': {'item_id': 'item-cement', 'item_name': 'Cement', 'item_unit': 'bag', 'per': 1, 'covers': 1},
+          }),
+        ],
+      };
+      await press(tester, 'stock-leftovers');
+    }
+
+    testWidgets('Issue or move opens as a sheet (no AppBar) with the title it had, and the mono labels in order', (tester) async {
+      await openStock(tester);
+      await press(tester, 'stock-issue');
+      expect(find.byKey(const Key('wm-sheet-close')), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(inSheet(find.text('Issue or move')), findsOneWidget);
+      double dy(String t) => tester.getTopLeft(inSheet(find.text(t))).dy;
+      final order = [dy('ITEM'), dy('FROM'), dy('TO'), dy('QUANTITY')];
+      for (var i = 1; i < order.length; i++) {
+        expect(order[i], greaterThan(order[i - 1]));
+      }
+      await tester.scrollUntilVisible(inSheet(find.text('NOTE (OPTIONAL)')), 200, scrollable: formScrollable());
+      expect(dy('NOTE (OPTIONAL)'), greaterThan(dy('QUANTITY')));
+      expect(inSheet(find.text('WHEN')), findsOneWidget);
+    });
+
+    testWidgets('Issue from stock and Return keep their own titles, in a sheet', (tester) async {
+      await openShell(tester);
+      await press(tester, 'issue-stock-p1');
+      expect(find.byKey(const Key('wm-sheet-close')), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(inSheet(find.text('Issue from stock')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('wm-sheet-close')));
+      await tester.pumpAndSettle();
+      await openStock(tester);
+      await tester.tap(find.byKey(const Key('stock-part-recent')));
+      await tester.pumpAndSettle();
+      await press(tester, 'return-r-issue');
+      expect(find.byKey(const Key('wm-sheet-close')), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(inSheet(find.text('Return to the warehouse')), findsOneWidget);
+    });
+
+    testWidgets('+ adds 1, - takes 1 and stops at 0, a typed 2.5 becomes 3.5, an empty or unreadable box counts as 0', (tester) async {
+      await openStock(tester);
+      await openIssue(tester);
+      expect(qty(tester), '');
+      await press(tester, 'move-plus');
+      expect(qty(tester), '1', reason: 'an empty box counts as 0');
+      await press(tester, 'move-plus');
+      await press(tester, 'move-minus');
+      await press(tester, 'move-minus');
+      expect(qty(tester), '0');
+      await press(tester, 'move-minus');
+      expect(qty(tester), '0', reason: 'never below zero');
+      await tester.enterText(find.byKey(const Key('move-qty')), '2.5');
+      await press(tester, 'move-plus');
+      expect(qty(tester), '3.5');
+      await press(tester, 'move-minus');
+      expect(qty(tester), '2.5');
+      await tester.enterText(find.byKey(const Key('move-qty')), 'abc');
+      await press(tester, 'move-plus');
+      expect(qty(tester), '1', reason: 'an unreadable box counts as 0');
+      expect(tester.getSize(find.byKey(const Key('move-minus'))).width, 52);
+      expect(tester.getSize(find.byKey(const Key('move-plus'))).height, 52);
+      final field = tester.getRect(find.byKey(const Key('move-qty')));
+      expect(tester.getRect(find.byKey(const Key('move-minus'))).right, lessThan(field.left + 1));
+      expect(tester.getRect(find.byKey(const Key('move-plus'))).left, greaterThan(field.right - 1));
+    });
+
+    testWidgets('a fixed preset (Issue from stock) still locks item, from, to and the request line, and leaves the quantity free', (tester) async {
+      await openShell(tester);
+      await press(tester, 'issue-stock-p1');
+      expect(tester.widget<DropdownButtonFormField<String>>(find.byKey(const Key('move-item'))).onChanged, isNull);
+      expect(tester.widget<DropdownButtonFormField<String>>(find.byKey(const Key('move-from'))).onChanged, isNull);
+      expect(tester.widget<DropdownButtonFormField<String>>(find.byKey(const Key('move-to'))).onChanged, isNull);
+      expect(tester.widget<DropdownButtonFormField<String?>>(find.byKey(const Key('move-request'))).onChanged, isNull);
+      expect(tester.widget<TextField>(find.byKey(const Key('move-qty'))).enabled, isTrue);
+      await press(tester, 'move-minus');
+      expect(qty(tester), '5');
+    });
+
+    testWidgets("Send sits in the sheet footer and records exactly today's parameters (Issue from stock)", (tester) async {
+      await openShell(tester);
+      await press(tester, 'issue-stock-p1');
+      expect(find.ancestor(of: find.byKey(const Key('move-send')), matching: find.byType(WmSheetFrame)), findsOneWidget);
+      expect(inSheetBody(find.byKey(const Key('move-send'))), findsNothing, reason: 'pinned in the footer, not in the scrolling body');
+      expect(inSheetBody(find.text(undoOnWeb.english)), findsNothing, reason: 'the note sits under the button, in the footer');
+      expect(inSheet(find.text(undoOnWeb.english)), findsOneWidget);
+      await press(tester, 'move-send');
+      expect(stock.writes.single.$2['p_body'], {
+        'item_id': 'item-cement',
+        'quantity': '6',
+        'on': stock.writes.single.$2['p_body']['on'],
+        'note': '',
+        'from': 'warehouse',
+        'to': 'f-barlin',
+        'request_line_id': 'l1',
+      });
+      expect(find.byKey(const Key('wm-sheet-close')), findsNothing, reason: 'the sheet closed');
+    });
+
+    testWidgets('answer lost: no Send, the unresolved box and the note in the body, fields and - / + locked', (tester) async {
+      await openStock(tester);
+      await openIssue(tester);
+      await pick(tester, 'move-to', 'Barlin Residence');
+      await pick(tester, 'move-request', 'Cement — Juan · 10 bag still needed');
+      await press(tester, 'move-plus');
+      await press(tester, 'move-plus');
+      await press(tester, 'move-plus');
+      stock.failNextWrite = const SocketException('lost');
+      await press(tester, 'move-send');
+      final op = stock.attempts.single.$1;
+      expect(find.byKey(const Key('move-send')), findsNothing);
+      expect(inSheetBody(find.byKey(Key('unsure-$op'))), findsOneWidget);
+      await tester.scrollUntilVisible(inSheetBody(find.text(undoOnWeb.english)), 200, scrollable: formScrollable());
+      expect(inSheetBody(find.text(undoOnWeb.english)), findsOneWidget);
+      await tester.scrollUntilVisible(find.byKey(const Key('move-qty')), -200, scrollable: formScrollable());
+      expect(tester.widget<TextField>(find.byKey(const Key('move-qty'))).enabled, isFalse);
+      final before = qty(tester);
+      for (final k in ['move-plus', 'move-minus']) {
+        await tester.ensureVisible(find.byKey(Key(k)));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(Key(k)), warnIfMissed: false);
+        await tester.pumpAndSettle();
+      }
+      expect(qty(tester), before, reason: 'locked: - and + do nothing');
+    });
+
+    testWidgets('the choices failing to load: the notice in the body and no Send footer', (tester) async {
+      await openStock(tester);
+      stock.failReads = const SocketException('offline');
+      await press(tester, 'stock-issue');
+      expect(inSheetBody(find.byKey(const Key('stock-load-failure'))), findsOneWidget);
+      expect(find.byKey(const Key('move-send')), findsNothing);
+      expect(inSheet(find.text(undoOnWeb.english)), findsNothing);
+    });
+
+    testWidgets('no peso in Issue / move or in Record leftovers', (tester) async {
+      await openStock(tester);
+      await openIssue(tester);
+      expect(find.textContaining('₱'), findsNothing);
+      await tester.tap(find.byKey(const Key('wm-sheet-close')));
+      await tester.pumpAndSettle();
+      await openLeftovers(tester);
+      await pick(tester, 'leftover-project', 'Barlin Residence');
+      await tester.tap(find.byKey(const Key('leftover-line-p-9:2')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('₱'), findsNothing);
+    });
+
+    testWidgets("Record leftovers is a page: back button, title, Send pinned in the footer, today's parameters", (tester) async {
+      await openStock(tester);
+      await openLeftovers(tester);
+      expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.text('Record leftovers'), findsWidgets);
+      await pick(tester, 'leftover-project', 'Barlin Residence');
+      await tester.tap(find.byKey(const Key('leftover-line-p-9:2')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('leftover-send')), findsOneWidget);
+      expect(find.descendant(of: find.byType(ListView), matching: find.byKey(const Key('leftover-send'))), findsNothing,
+          reason: 'pinned in the footer, not in the scrolling body');
+      expect(find.descendant(of: find.byType(ListView), matching: find.text(undoOnWeb.english)), findsNothing);
+      await tester.enterText(find.byKey(const Key('leftover-qty')), '3');
+      await tester.tap(find.text('Brought to the warehouse'));
+      await tester.pumpAndSettle();
+      await press(tester, 'leftover-send');
+      final (fn, params, _) = stock.writes.single;
+      expect(fn, 'stk_leftover');
+      expect(params['p_purchase'], 'p-9');
+      expect(params['p_line_no'], 2);
+      expect(params['p_qty'], '3');
+      expect(params['p_where'], 'warehouse');
+    });
+
+    testWidgets('Record leftovers: the choices failing to load show the notice and no Send', (tester) async {
+      await openStock(tester);
+      stock.failReads = const SocketException('offline');
+      await press(tester, 'stock-leftovers');
+      expect(find.byKey(const Key('stock-load-failure')), findsOneWidget);
+      expect(find.byKey(const Key('leftover-send')), findsNothing);
+    });
+
+    testWidgets('320 x 568 at text scale 1.3: the Issue / move sheet and Record leftovers raise no exception', (tester) async {
+      await openStock(tester, size: const Size(320, 568), scale: 1.3);
+      await press(tester, 'stock-issue');
+      expect(find.byKey(const Key('move-send')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('wm-sheet-close')));
+      await tester.pumpAndSettle();
+      await openLeftovers(tester);
+      expect(find.byKey(const Key('leftover-project')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the quantity box is filled like every other field', (tester) async {
+      await openStock(tester);
+      await openIssue(tester);
+      final box = tester.widget<InputDecorator>(find.descendant(of: find.byKey(const Key('move-qty')), matching: find.byType(InputDecorator))).decoration;
+      expect(box.filled, isTrue);
+      expect(box.fillColor, WmColors.field);
+    });
   });
 
   group('a record whose answer was lost survives reopening and a restart (R101)', () {
@@ -716,7 +977,7 @@ void main() {
       stock.failNextWrite = const SocketException('lost');
       await press(tester, 'issue-stock-p1');
       await press(tester, 'move-send');
-      await tester.pageBack();
+      await tester.tap(find.byKey(const Key('wm-sheet-close')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('issue-stock-p1')), findsNothing, reason: 'nothing new until it is resolved');
       stock.statusAnswer = StockStatus.off;

@@ -76,49 +76,9 @@ mixin StockSending<T extends StatefulWidget> on State<T> {
     }
   }
 
-  /// Send, or — once locked — the unresolved box in its place.
-  Widget sendArea({required Key sendKey, required VoidCallback onSend}) {
-    final op = unsureOp;
-    if (op != null) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: UnresolvedBox(
-          submitter: submitter,
-          opId: op,
-          firstFailure: _unsureWhy,
-          inForm: true,
-          onRecorded: () {
-            if (mounted) Navigator.of(context).pop(true);
-          },
-          // Settled not recorded — refused, or cancelled by the server: the
-          // fields open again, saying why; the next Send is a new operation.
-          onSettledNotRecorded: (f) => setState(() {
-            unsureOp = null;
-            failure = f;
-          }),
-        ),
-      );
-    }
-    final f = failure;
-    final m = message;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (f != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: FailureNotice(key: const Key('stock-failure'), english: stockFailureCopy(f).english, tagalog: stockFailureCopy(f).tagalog),
-        ),
-      if (m != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: FailureNotice(key: const Key('stock-blocked'), english: m.english, tagalog: m.tagalog),
-        ),
-      const SizedBox(height: 12),
-      sending ? const LinearProgressIndicator() : bilingualButton(sendLabel, onSend, filled: true, key: sendKey),
-    ]);
-  }
-
-  /// The unresolved box, once locked (a sheet's body shows it in place of Send).
-  /// Same behaviour as [sendArea]'s box; for sheets with a pinned footer.
+  /// The unresolved box, once locked (a form's body shows it in place of Send).
+  /// Settled not recorded — refused, or cancelled by the server: the fields
+  /// open again, saying why; the next Send is a new operation.
   Widget? sendBox() {
     final op = unsureOp;
     if (op == null) return null;

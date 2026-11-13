@@ -20,9 +20,10 @@ enum StockPart { stock, receive, recent }
 
 /// Opens the issue / move / return form; true when the server recorded it.
 Future<bool> openMove(BuildContext context, StockController controller, StockSubmitter submitter, MovePreset preset) async {
-  final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
+  final done = await showWmSheet<bool>(
+    context,
     builder: (_) => MoveScreen(remote: controller.remote, submitter: submitter, preset: preset, overview: controller.overview),
-  ));
+  );
   return done == true;
 }
 

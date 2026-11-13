@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../purchasing/ui/purchasing_copy.dart' show BilingualText;
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_page.dart';
 import '../data/stock_remote.dart';
 import '../data/stock_submitter.dart';
 import '../domain/stock_failure.dart';
@@ -97,31 +98,43 @@ class _LeftoverScreenState extends State<LeftoverScreen> with StockSending {
     if (ok && mounted) Navigator.of(context).pop(true);
   }
 
+  /// Send, with the two-language "A mistake?" note under it (pinned footer).
+  /// Null while the choices load or fail, and once locked (the body shows
+  /// the unresolved box and the note instead).
+  Widget? _footer() {
+    if (_choices == null || _loadFailure != null) return null;
+    final send = sendFooter(sendKey: const Key('leftover-send'), onSend: _send);
+    if (send == null) return null;
+    return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      send,
+      const SizedBox(height: 8),
+      const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+    ]);
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Record leftovers')),
-        body: SafeArea(
-          child: _loadFailure != null
-              ? Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: FailureNotice(
-                    key: const Key('stock-load-failure'),
-                    english: stockFailureCopy(_loadFailure!).english,
-                    tagalog: stockFailureCopy(_loadFailure!).tagalog,
-                    actions: [noticeAction('Try again · Subukan ulit', _load)],
-                  ),
-                )
-              : _choices == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : ListView(padding: const EdgeInsets.all(16), children: _fields(_choices!)),
-        ),
+  Widget build(BuildContext context) => WmPage(
+        title: 'Record leftovers',
+        footer: _footer(),
+        children: _loadFailure != null
+            ? [
+                FailureNotice(
+                  key: const Key('stock-load-failure'),
+                  english: stockFailureCopy(_loadFailure!).english,
+                  tagalog: stockFailureCopy(_loadFailure!).tagalog,
+                  actions: [noticeAction('Try again · Subukan ulit', _load)],
+                ),
+              ]
+            : _choices == null
+                ? const [Padding(padding: EdgeInsets.symmetric(vertical: 32), child: Center(child: CircularProgressIndicator()))]
+                : _fields(_choices!),
       );
 
   List<Widget> _fields(StockChoices choices) {
     final line = _line;
     final unit = line?.match?.itemUnit ?? '';
     return [
-      const StockFieldLabel('Project'),
+      const _MonoLabel('PROJECT'),
       DropdownButtonFormField<String>(
         key: const Key('leftover-project'),
         initialValue: _project,
@@ -132,7 +145,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> with StockSending {
       ),
       if (_project != null && _lines == null) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       if (_lines != null) ...[
-        const StockFieldLabel('Which purchase'),
+        const _MonoLabel('WHICH PURCHASE'),
         if (_lines!.isEmpty) const Text('No purchase for this project yet.', style: TextStyle(color: WmColors.textMuted)),
         IgnorePointer(
           ignoring: locked,
@@ -155,7 +168,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> with StockSending {
         ),
       ],
       if (line != null) ...[
-        const StockFieldLabel('How much is left over?'),
+        const _MonoLabel('HOW MUCH IS LEFT OVER?'),
         TextField(
           key: const Key('leftover-qty'),
           controller: _qty,
@@ -163,7 +176,7 @@ class _LeftoverScreenState extends State<LeftoverScreen> with StockSending {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(suffixText: unit),
         ),
-        const StockFieldLabel('Where is it?'),
+        const _MonoLabel('WHERE IS IT?'),
         SegmentedButton<String>(
           key: const Key('leftover-where'),
           segments: const [
@@ -173,14 +186,25 @@ class _LeftoverScreenState extends State<LeftoverScreen> with StockSending {
           selected: {_where},
           onSelectionChanged: locked ? null : (s) => setState(() => _where = s.first),
         ),
-        const StockFieldLabel('When'),
+        const _MonoLabel('WHEN'),
         Align(alignment: Alignment.centerLeft, child: StockDayField(value: _on, today: _today, onChanged: locked ? null : (d) => setState(() => _on = d))),
-        const StockFieldLabel('Note (optional)'),
+        const _MonoLabel('NOTE (OPTIONAL)'),
         TextField(key: const Key('leftover-note'), controller: _note, enabled: !locked, maxLength: 300),
       ],
-      sendArea(sendKey: const Key('leftover-send'), onSend: _send),
-      const SizedBox(height: 8),
-      const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+      ?sendBox(),
+      if (locked) ...[
+        const SizedBox(height: 8),
+        const BilingualText(undoOnWeb, style: TextStyle(fontSize: 12.5, color: WmColors.textMuted)),
+      ],
     ];
   }
+}
+
+/// The small mono capital label over a control.
+class _MonoLabel extends StatelessWidget {
+  const _MonoLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 18, bottom: 8), child: Text(text, style: monoLabel));
 }

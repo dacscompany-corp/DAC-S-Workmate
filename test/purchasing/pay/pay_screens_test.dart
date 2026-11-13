@@ -14,6 +14,7 @@ import 'package:workmate/purchasing/mine/my_purchases_screen.dart';
 import 'package:workmate/purchasing/mine/purchase_detail_screen.dart';
 import 'package:workmate/purchasing/pay/my_cash_screen.dart';
 import 'package:workmate/purchasing/pay/record_payment_screen.dart';
+import 'package:workmate/purchasing/pay/report_return_screen.dart';
 import 'package:workmate/purchasing/purchasing_services.dart';
 import 'package:workmate/purchasing/record/record_controller.dart';
 import 'package:workmate/purchasing/record/record_screen.dart';
@@ -583,6 +584,27 @@ void main() {
       expect(find.text('₱700.00 left to pay'), findsOneWidget);
     });
 
+    testWidgets('Phase 6b: the "Saved" snack bar is cleared when Record payment opens again, so it never floats over Save', (tester) async {
+      api.detail = PurchaseDetail.fromJson(const {'id': 'pu1', 'status': 'recorded', 'supplier': 'ZZ Hardware', 'receipt_total': 1000});
+      api.payments = PurchasePayments.fromJson({
+        'pay': {'state': 'partial', 'tracked': true, 'due': 1000, 'paid': 300, 'balance': 700},
+        'payments': [],
+        'me': {'holder': true},
+      });
+      await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
+      await tester.ensureVisible(find.byKey(const Key('detail-pay')));
+      await tester.tap(find.byKey(const Key('detail-pay')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('pay-save')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Saved. It is sent when there is signal.'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('detail-pay')));
+      await tester.tap(find.byKey(const Key('detail-pay')));
+      await tester.pumpAndSettle();
+      expect(find.byType(RecordPaymentScreen), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
     testWidgets('payments waiting on the phone show on the purchase and count in what is left — never offered twice', (tester) async {
       api.detail = PurchaseDetail.fromJson(const {'id': 'pu1', 'status': 'recorded', 'supplier': 'ZZ Hardware', 'receipt_total': 1000});
       api.payments = PurchasePayments.fromJson({
@@ -648,6 +670,9 @@ void main() {
         await tester.ensureVisible(find.byKey(const Key('detail-pay')));
         await tester.tap(find.byKey(const Key('detail-pay')));
         await tester.pumpAndSettle();
+        // The first save's "recorded" snack bar floats over the pinned Save button for a few seconds: clear it, as a person waits it out.
+        ScaffoldMessenger.of(tester.element(find.byType(RecordPaymentScreen))).clearSnackBars();
+        await tester.pumpAndSettle();
         await reach(tester, find.byKey(const Key('pay-save')), list: const Key('pay-form'));
         await tester.tap(find.byKey(const Key('pay-save')));
         await tester.pump();
@@ -704,6 +729,341 @@ void main() {
       await show(tester, PurchaseDetailScreen(purchaseId: 'pu1', services: services));
       expect(find.text('ZZ Hardware'), findsOneWidget);
       expect(find.byKey(const Key('payments-offline')), findsOneWidget);
+    });
+  });
+
+  // Phase 6b: My cash, its card, Record payment and Report a return take the WmPage look (layout only).
+  group('Phase 6b: the pay pages in the new look', () {
+    Finder inList(Key k) => find.descendant(of: find.byType(ListView), matching: find.byKey(k));
+    Finder inFooter(Key k) => find.descendant(of: find.byType(SingleChildScrollView), matching: find.byKey(k));
+
+    void useSmallPhone(WidgetTester tester) {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    }
+
+    group('Record payment', () {
+      Widget screen() => RecordPaymentScreen(services: services, purchaseId: 'pu1', supplier: 'ZZ Hardware', supplierId: 's1', left: 700);
+
+      testWidgets('a round back button, the title, and Save pinned in the footer (not in the scrolling list)', (tester) async {
+        await show(tester, screen());
+        expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+        expect(find.byType(AppBar), findsNothing);
+        expect(find.text('Record payment'), findsWidgets);
+        expect(find.text('Itala ang bayad'), findsWidgets);
+        expect(inFooter(const Key('pay-save')), findsOneWidget);
+        expect(inList(const Key('pay-save')), findsNothing);
+        expect(find.text('₱700.00 left to pay'), findsOneWidget);
+      });
+
+      testWidgets('Save in the footer queues exactly today\'s body', (tester) async {
+        await show(tester, screen());
+        await tester.tap(find.byKey(const Key('pay-save')));
+        await tester.pumpAndSettle();
+        final (id, input, proof) = api.paid.single;
+        expect([id, input.amount, input.source, input.paidOn, input.method, input.note, proof], ['pu1', '700.00', 'petty_cash', '2026-10-21', 'cash', '', null]);
+      });
+
+      testWidgets('the over-spend warning and a problem sit by their fields', (tester) async {
+        await show(tester, RecordPaymentScreen(services: services, purchaseId: 'pu1', supplier: 'ZZ Hardware', supplierId: 's1', left: 2000));
+        final warn = tester.getTopLeft(find.byKey(const Key('pay-overspend'))).dy;
+        expect(warn, greaterThan(tester.getTopLeft(find.byKey(const Key('pay-method'))).dy));
+        expect(warn, lessThan(tester.getTopLeft(find.byKey(const Key('pay-note'))).dy));
+        await tester.enterText(find.byKey(const Key('pay-amount')), '0');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('pay-save')));
+        await tester.pumpAndSettle();
+        expect(api.paid, isEmpty);
+        expect(find.byKey(const Key('pay-problem-badAmount')), findsOneWidget);
+        expect(tester.getTopLeft(find.byKey(const Key('pay-problem-badAmount'))).dy, lessThan(tester.getTopLeft(find.byKey(const Key('pay-date'))).dy));
+      });
+
+      testWidgets('the round back button leaves; during a slow Save it does not', (tester) async {
+        useTallPhone(tester);
+        await tester.pumpWidget(MaterialApp(
+          theme: workMateTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => openRecordPayment(context, services, purchaseId: 'pu1', supplier: 'ZZ Hardware', supplierId: 's1', left: 700),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        final gate = Completer<void>();
+        api.saveGate = gate;
+        await tester.tap(find.byKey(const Key('pay-save')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pump();
+        expect(ModalRoute.of(tester.element(find.byType(RecordPaymentScreen)))!.isCurrent, isTrue, reason: 'Back waits for Save');
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(find.byType(RecordPaymentScreen), findsNothing);
+        expect(api.paid, hasLength(1));
+      });
+
+      testWidgets('back without saving closes the page', (tester) async {
+        useTallPhone(tester);
+        await tester.pumpWidget(MaterialApp(
+          theme: workMateTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => openRecordPayment(context, services, purchaseId: 'pu1', supplier: 'ZZ Hardware', supplierId: 's1', left: 700),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pumpAndSettle();
+        expect(find.byType(RecordPaymentScreen), findsNothing);
+        expect(api.paid, isEmpty);
+      });
+
+      testWidgets('320 x 568 at text scale 1.3 raises no exception', (tester) async {
+        useSmallPhone(tester);
+        await tester.pumpWidget(MaterialApp(theme: workMateTheme(), home: screen()));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const Key('pay-save')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    group('Report a return', () {
+      Future<void> openReturn(WidgetTester tester) async {
+        api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 1470, held: 1470));
+        await show(tester, MyCashScreen(services: services));
+        await tester.tap(find.byKey(const Key('report-return')));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('a round back button, the title, Save pinned in the footer; the hold hint stays', (tester) async {
+        await openReturn(tester);
+        expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+        expect(find.byType(AppBar), findsNothing);
+        expect(find.text('Report a return'), findsWidgets);
+        expect(inFooter(const Key('return-save')), findsOneWidget);
+        expect(inList(const Key('return-save')), findsNothing);
+        expect(find.text('You hold ₱1,470.00 on record.'), findsOneWidget);
+      });
+
+      testWidgets('Save in the footer queues exactly today\'s body; a problem shows by its field', (tester) async {
+        await openReturn(tester);
+        await tester.tap(find.byKey(const Key('return-save')));
+        await tester.pumpAndSettle();
+        expect(api.returned, isEmpty);
+        expect(find.byKey(const Key('return-problem-amount')), findsOneWidget);
+        expect(tester.getTopLeft(find.byKey(const Key('return-problem-amount'))).dy, lessThan(tester.getTopLeft(find.byKey(const Key('return-date'))).dy));
+        await tester.enterText(find.byKey(const Key('return-amount')), '1000');
+        await tester.enterText(find.byKey(const Key('return-to')), 'the owner');
+        await tester.enterText(find.byKey(const Key('return-note')), 'n');
+        await tester.tap(find.byKey(const Key('return-save')));
+        await tester.pumpAndSettle();
+        final (r, photo) = api.returned.single;
+        expect([r.amount, r.handedOn, r.handedTo, r.note, photo], ['1000', '2026-10-21', 'the owner', 'n', null]);
+        expect(find.byType(ReportReturnScreen), findsNothing, reason: 'queued: the page closes');
+      });
+
+      testWidgets('the round back button leaves; during a slow Save it does not', (tester) async {
+        await openReturn(tester);
+        await tester.enterText(find.byKey(const Key('return-amount')), '200');
+        final gate = Completer<void>();
+        api.saveGate = gate;
+        await tester.tap(find.byKey(const Key('return-save')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pump();
+        expect(ModalRoute.of(tester.element(find.byKey(const Key('return-save'))))!.isCurrent, isTrue, reason: 'Back waits for Save');
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(api.returned, hasLength(1));
+      });
+
+      testWidgets('back without saving closes the page', (tester) async {
+        await openReturn(tester);
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pumpAndSettle();
+        expect(find.byType(ReportReturnScreen), findsNothing);
+        expect(find.byKey(const Key('my-cash')), findsOneWidget);
+      });
+
+      testWidgets('320 x 568 at text scale 1.3 raises no exception', (tester) async {
+        useSmallPhone(tester);
+        await tester.pumpWidget(MaterialApp(theme: workMateTheme(), home: ReportReturnScreen(services: services, held: 1470)));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const Key('return-save')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    group('My cash', () {
+      const cash = MyCashView(
+        cash: MyCash(
+          holder: true,
+          recorded: 1470,
+          held: 1470,
+          owes: 50,
+          issues: [CashIssue(id: 'i1', amount: 4500, issuedOn: '2026-10-22', method: 'cash')],
+          returns: [CashReturn(id: 'r1', amount: 1000, handedOn: '2026-10-23', status: 'reported')],
+          repayments: [Repayment(id: 'p1', amount: 250, paidOn: '2026-10-24', method: 'cash')],
+        ),
+        queued: [QueuedCashAction(opId: 'q1', kind: opCashReturn, body: {'amount': '100.00'}, state: QueuedState.waiting)],
+      );
+
+      testWidgets('a round back button, the title with its Tagalog, no AppBar and no footer; report-return stays in the body', (tester) async {
+        api.cash = cash;
+        await show(tester, MyCashScreen(services: services));
+        expect(find.byKey(const Key('wm-page-back')), findsOneWidget);
+        expect(find.byType(AppBar), findsNothing);
+        expect(find.text('My cash'), findsWidgets);
+        expect(find.text('Pera ko'), findsOneWidget);
+        expect(inList(const Key('report-return')), findsOneWidget);
+        expect(find.byKey(const Key('my-cash')), findsOneWidget);
+      });
+
+      const labels = [
+        ('NOT SENT YET', 'Hindi pa naipapadala'),
+        ('PETTY CASH YOU WERE GIVEN (90 DAYS)', 'Petty cash na ibinigay sa iyo (90 araw)'),
+        ('RETURNS', 'Mga ibinalik'),
+        ('REPAID TO YOU (90 DAYS)', 'Ibinalik sa iyo (90 araw)'),
+      ];
+
+      testWidgets('a group label that fits is one line: English in capitals, then · Tagalog', (tester) async {
+        api.cash = cash;
+        await show(tester, MyCashScreen(services: services));
+        // Wide enough for the longest label on one line.
+        tester.view.physicalSize = const Size(3600, 3000);
+        await tester.pumpAndSettle();
+        for (final (en, tl) in labels) {
+          await tester.ensureVisible(find.text(en));
+          await tester.pumpAndSettle();
+          expect(find.text(en), findsOneWidget, reason: en);
+          expect(find.text(' · $tl'), findsOneWidget, reason: tl);
+          expect(find.text(tl), findsNothing, reason: '$en: the Tagalog keeps its dot while it fits');
+          final english = tester.getRect(find.text(en)), tagalog = tester.getRect(find.text(' · $tl'));
+          expect(tagalog.center.dy, closeTo(english.center.dy, 1), reason: '$en: on one line');
+          expect(tagalog.left, greaterThanOrEqualTo(english.right - .5), reason: '$en: the Tagalog after the English');
+        }
+      });
+
+      testWidgets('a group label too long for one line puts the Tagalog on its own line, without the dot', (tester) async {
+        api.cash = cash;
+        await show(tester, MyCashScreen(services: services));
+        for (final (en, tl) in labels.where((l) => l.$1 != 'RETURNS')) {
+          await tester.ensureVisible(find.text(en));
+          await tester.pumpAndSettle();
+          expect(find.text(en), findsOneWidget, reason: en);
+          expect(find.text(tl), findsOneWidget, reason: tl);
+          expect(find.text(' · $tl'), findsNothing, reason: '$en: no dot left at the start of a line');
+          final english = tester.getRect(find.text(en)), tagalog = tester.getRect(find.text(tl));
+          expect(tagalog.top, greaterThanOrEqualTo(english.bottom - .5), reason: '$en: the Tagalog under the English');
+          expect(tagalog.left, closeTo(english.left, .5), reason: '$en: both start at the left');
+        }
+        // A short label on the same screen still fits on one line, with its dot.
+        await tester.ensureVisible(find.text('RETURNS'));
+        await tester.pumpAndSettle();
+        expect(find.text(' · Mga ibinalik'), findsOneWidget);
+        expect(find.text('Mga ibinalik'), findsNothing);
+      });
+
+      testWidgets('the figures and every list row keep their amounts and actions', (tester) async {
+        api.cash = cash;
+        await show(tester, MyCashScreen(services: services));
+        expect(find.descendant(of: find.byKey(const Key('detail-held')), matching: find.text('₱1,470.00')), findsOneWidget);
+        expect(find.descendant(of: find.byKey(const Key('detail-owes')), matching: find.text('₱50.00')), findsOneWidget);
+        for (final k in ['issue-i1', 'dispute-i1', 'queued-return-q1', 'return-r1', 'withdraw-r1']) {
+          await tester.ensureVisible(find.byKey(Key(k)));
+          await tester.pumpAndSettle();
+          expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+        }
+        expect(find.textContaining('₱4,500.00'), findsOneWidget);
+        expect(find.textContaining('₱1,000.00'), findsOneWidget);
+        await tester.ensureVisible(find.textContaining('₱250.00'));
+        expect(find.textContaining('₱250.00'), findsOneWidget);
+      });
+
+      testWidgets('the round back button leaves My cash', (tester) async {
+        api.cash = cash;
+        useTallPhone(tester);
+        await tester.pumpWidget(MaterialApp(
+          theme: workMateTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MyCashScreen(services: services))), child: const Text('open')),
+            ),
+          ),
+        ));
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        expect(find.byType(MyCashScreen), findsOneWidget);
+        await tester.tap(find.byKey(const Key('wm-page-back')));
+        await tester.pumpAndSettle();
+        expect(find.byType(MyCashScreen), findsNothing);
+      });
+
+      testWidgets('320 x 568 at text scale 1.3 raises no exception', (tester) async {
+        api.cash = cash;
+        useSmallPhone(tester);
+        await tester.pumpWidget(MaterialApp(theme: workMateTheme(), home: MyCashScreen(services: services)));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    group('the My cash card', () {
+      testWidgets('is a white bordered card, radius 16, no shadow, with its figures, a chevron, and opens My cash', (tester) async {
+        api.cash = const MyCashView(cash: MyCash(holder: true, recorded: 470, held: 470, owes: 50));
+        final c = MyPurchasesController(api: api);
+        await c.refresh();
+        await show(tester, Scaffold(body: MyPurchasesScreen(controller: c, onOpenDraft: (_) {}, onOpenPurchase: (_) {}, services: services)));
+        final card = find.byKey(const Key('my-cash-card'));
+        expect(card, findsOneWidget);
+        expect(find.byType(Card), findsNothing, reason: 'the 6a card is a bordered container, not a Material card');
+        final box = tester.widget<Container>(card);
+        final deco = box.decoration! as BoxDecoration;
+        expect(deco.color, Colors.white);
+        expect(deco.borderRadius, BorderRadius.circular(16));
+        expect(deco.border, isNotNull);
+        expect(deco.boxShadow, isNull);
+        expect(find.descendant(of: card, matching: find.byIcon(Icons.chevron_right)), findsOneWidget);
+        expect(find.descendant(of: find.byKey(const Key('cash-held')), matching: find.text('₱470.00')), findsOneWidget);
+        expect(find.descendant(of: find.byKey(const Key('cash-owes')), matching: find.text('₱50.00')), findsOneWidget);
+        await tester.tap(card);
+        await tester.pumpAndSettle();
+        expect(find.byType(MyCashScreen), findsOneWidget);
+      });
+
+      testWidgets('320 x 568 at text scale 1.3 raises no exception', (tester) async {
+        api.cash = const MyCashView(
+          cash: MyCash(holder: true, recorded: 470, held: 470, owes: 50),
+          unsentPettyCash: 1000,
+          queued: [QueuedCashAction(opId: 'r1', kind: opCashReturn, body: {'amount': '100.00'}, state: QueuedState.waiting)],
+        );
+        useSmallPhone(tester);
+        final c = MyPurchasesController(api: api);
+        await c.refresh();
+        await tester.pumpWidget(MaterialApp(
+          theme: workMateTheme(),
+          home: Scaffold(body: MyPurchasesScreen(controller: c, onOpenDraft: (_) {}, onOpenPurchase: (_) {}, services: services)),
+        ));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('my-cash-card')), findsOneWidget);
+      });
     });
   });
 }

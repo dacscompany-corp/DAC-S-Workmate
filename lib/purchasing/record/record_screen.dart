@@ -7,6 +7,8 @@ import '../../attendance/ui/attendance_copy.dart' show Bilingual;
 import '../../requests/domain/quantity.dart';
 import '../../ui/failure_notice.dart';
 import '../../ui/theme.dart';
+import '../../ui/wm_chips.dart';
+import '../../ui/wm_sheet.dart';
 import '../domain/pay_models.dart';
 import '../domain/pur_models.dart';
 import '../domain/purchase_draft.dart';
@@ -24,8 +26,12 @@ Future<bool> openRecord(BuildContext context, PurchasingServices services, {List
       api.newDraft(
         lines: lines != null && lines.isNotEmpty ? lines : [DraftPurchaseLine(key: api.newLineKey(), quantity: '1', category: 'Materials')],
       );
-  final queued = await Navigator.of(context).push<bool>(
-    MaterialPageRoute(builder: (_) => RecordScreen(controller: RecordController(api: api, draft: d)..load(), services: services)),
+  // Made once, outside the builder: the sheet's builder runs again when the keyboard moves.
+  final controller = RecordController(api: api, draft: d)..load();
+  // A swipe-down sheet. Closing it (the cross, Back, swiping down) pops with null and keeps the draft.
+  final queued = await showWmSheet<bool>(
+    context,
+    builder: (_) => RecordScreen(controller: controller, services: services),
   );
   return queued == true;
 }
@@ -68,121 +74,131 @@ class RecordScreen extends StatelessWidget {
           final d = c.draft;
           final problems = c.problems;
           final general = [for (final p in problems) if (p.line == null && p.charge == null) p];
-          return Scaffold(
-            appBar: AppBar(
-              title: const BilingualText(recordLabel, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              actions: [IconButton(key: const Key('record-discard'), tooltip: 'Throw away', onPressed: () => _discard(context), icon: const Icon(Icons.delete_outline))],
-            ),
-            body: SafeArea(
-              child: ListView(key: const Key('record-form'), padding: const EdgeInsets.all(16), children: [
-                const Text('Saved on this phone as you type. It is sent when there is signal.',
-                    style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
-                if (c.notice != null) ...[
-                  const SizedBox(height: 10),
-                  FailureNotice(english: c.notice!.english, tagalog: c.notice!.tagalog),
-                ],
-                const SizedBox(height: 14),
-                _heading('1', 'The purchase'),
-                _DateField(value: d.purchaseDate, onChanged: c.setDate),
-                const SizedBox(height: 10),
-                _SupplierField(controller: c),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  key: const Key('payment'),
-                  initialValue: paymentMethods.contains(d.paymentMethod) ? d.paymentMethod : 'Cash',
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Paid with'),
-                  items: [
-                    for (final m in paymentMethods)
-                      DropdownMenuItem(value: m, child: Text(m.isEmpty ? 'Not yet paid / not known' : m, overflow: TextOverflow.ellipsis)),
+          // `record-form` marks the sheet whose own list scrolls (the tests and
+          // the shell look for it). The Material keeps the form's inks and
+          // fields working when this is shown on its own, outside a sheet.
+          return KeyedSubtree(
+            key: const Key('record-form'),
+            child: Material(
+              type: MaterialType.transparency,
+              child: WmSheetFrame(
+                tall: true,
+                title: recordLabel.english,
+                subtitle: recordLabel.tagalog,
+                action: Tooltip(
+                  message: 'Throw away',
+                  excludeFromSemantics: true,
+                  child: WmRoundButton(key: const Key('record-discard'), icon: Icons.delete_outline, label: 'Throw away', onTap: () => _discard(context)),
+                ),
+                footer: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // The button is pinned and the problems sit by their fields, which may be
+                  // scrolled away: the first one is repeated here, in its own words.
+                  if (problems.isNotEmpty) ...[
+                    _FirstProblem(problems.first),
+                    const SizedBox(height: 8),
                   ],
-                  onChanged: (m) => c.setPayment(m ?? ''),
-                ),
-                const SizedBox(height: 18),
-                _heading('2', 'What was bought'),
-                for (var i = 0; i < d.lines.length; i++)
-                  _LineCard(
-                    key: ValueKey(d.lines[i].key),
-                    index: i,
-                    line: d.lines[i],
-                    controller: c,
-                    problems: [for (final p in problems) if (p.line == i + 1) p],
+                  WmSheetButton(
+                    key: const Key('record-send'),
+                    label: recordLabel.english,
+                    tagalog: recordLabel.tagalog,
+                    icon: Icons.check,
+                    busy: c.sending,
+                    onPressed: () => _send(context),
                   ),
-                TextButton.icon(
-                  key: const Key('add-line'),
-                  onPressed: c.addLine,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add an item with no request'),
-                ),
-                const SizedBox(height: 18),
-                _heading('3', 'Delivery fees and discounts'),
-                const Text('Optional. Shared across the items by amount unless you adjust it.',
-                    style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
-                for (var i = 0; i < d.charges.length; i++)
-                  _ChargeCard(
-                    key: ValueKey('charge-$i-${d.charges[i].kind}'),
-                    index: i,
-                    controller: c,
-                    problems: [for (final p in problems) if (p.charge == i + 1) p],
-                  ),
-                Wrap(spacing: 8, children: [
-                  TextButton.icon(
-                      key: const Key('add-fee'), onPressed: () => c.addCharge('delivery_fee'), icon: const Icon(Icons.add), label: const Text('Delivery fee')),
-                  TextButton.icon(
-                      key: const Key('add-discount'), onPressed: () => c.addCharge('discount'), icon: const Icon(Icons.add), label: const Text('Discount')),
                 ]),
-                const SizedBox(height: 18),
-                _heading('4', 'Receipt'),
-                _ReceiptPhotos(controller: c, services: services),
-                const SizedBox(height: 18),
-                TextFormField(
-                  key: const Key('notes'),
-                  initialValue: d.notes,
-                  maxLines: 2,
-                  decoration: const InputDecoration(labelText: 'Notes (optional)'),
-                  onChanged: c.setNotes,
-                ),
-                const SizedBox(height: 18),
-                _heading('5', 'Receipt total'),
-                TextFormField(
-                  key: const Key('receipt-total'),
-                  initialValue: d.receiptTotal,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Total on the receipt', prefixText: '₱ '),
-                  onChanged: c.setTotal,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  key: const Key('computed-total'),
-                  'Items + fees − discounts: ${peso(d.computedTotal)}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: parseMoney(d.receiptTotal) != null && round2(parseMoney(d.receiptTotal)!) == d.computedTotal ? WmColors.green : WmColors.textSecondary,
+                children: [
+                  const Text('Saved on this phone as you type. It is sent when there is signal.', style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                  if (c.notice != null) ...[
+                    const SizedBox(height: 10),
+                    FailureNotice(english: c.notice!.english, tagalog: c.notice!.tagalog),
+                  ],
+                  const SizedBox(height: 14),
+                  _section('ITEMS (${d.lines.length})', first: true),
+                  for (var i = 0; i < d.lines.length; i++)
+                    _LineCard(
+                      key: ValueKey(d.lines[i].key),
+                      index: i,
+                      line: d.lines[i],
+                      controller: c,
+                      problems: [for (final p in problems) if (p.line == i + 1) p],
+                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: WmPillButton(key: const Key('add-line'), icon: Icons.add, label: 'Add an item with no request', onTap: c.addLine),
                   ),
-                ),
-                const SizedBox(height: 18),
-                _heading('6', 'Paid now?'),
-                const Text('Optional. A payment never changes Spent — it only says how the receipt was paid.',
-                    style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
-                const SizedBox(height: 8),
-                _PaidNow(controller: c),
-                for (final p in general) ...[const SizedBox(height: 8), _ProblemText(p)],
-                const SizedBox(height: 20),
-                bilingualButton(recordLabel, c.sending ? null : () => _send(context), filled: true, key: const Key('record-send')),
-                const SizedBox(height: 24),
-              ]),
+                  _section('SUPPLIER AND DATE'),
+                  _DateField(value: d.purchaseDate, onChanged: c.setDate),
+                  const SizedBox(height: 10),
+                  _SupplierField(controller: c),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    key: const Key('payment'),
+                    initialValue: paymentMethods.contains(d.paymentMethod) ? d.paymentMethod : 'Cash',
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Paid with'),
+                    items: [
+                      for (final m in paymentMethods)
+                        DropdownMenuItem(value: m, child: Text(m.isEmpty ? 'Not yet paid / not known' : m, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: (m) => c.setPayment(m ?? ''),
+                  ),
+                  _section('DELIVERY FEES AND DISCOUNTS'),
+                  const Text('Optional. Shared across the items by amount unless you adjust it.', style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                  for (var i = 0; i < d.charges.length; i++)
+                    _ChargeCard(
+                      key: ValueKey('charge-$i-${d.charges[i].kind}'),
+                      index: i,
+                      controller: c,
+                      problems: [for (final p in problems) if (p.charge == i + 1) p],
+                    ),
+                  const SizedBox(height: 10),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    WmPillButton(key: const Key('add-fee'), icon: Icons.add, label: 'Delivery fee', onTap: () => c.addCharge('delivery_fee')),
+                    WmPillButton(key: const Key('add-discount'), icon: Icons.add, label: 'Discount', onTap: () => c.addCharge('discount')),
+                  ]),
+                  _section('RECEIPT'),
+                  _ReceiptPhotos(controller: c, services: services),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    key: const Key('receipt-total'),
+                    initialValue: d.receiptTotal,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Total on the receipt', prefixText: '₱ '),
+                    onChanged: c.setTotal,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    key: const Key('computed-total'),
+                    'Items + fees − discounts: ${peso(d.computedTotal)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: parseMoney(d.receiptTotal) != null && round2(parseMoney(d.receiptTotal)!) == d.computedTotal ? WmColors.green : WmColors.textSecondary,
+                    ),
+                  ),
+                  _section('NOTES'),
+                  TextFormField(
+                    key: const Key('notes'),
+                    initialValue: d.notes,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Notes (optional)'),
+                    onChanged: c.setNotes,
+                  ),
+                  _section('PAID NOW?'),
+                  const Text('Optional. A payment never changes Spent — it only says how the receipt was paid.', style: TextStyle(fontSize: 13, color: WmColors.textMuted)),
+                  const SizedBox(height: 8),
+                  _PaidNow(controller: c),
+                  for (final p in general) ...[const SizedBox(height: 8), _ProblemText(p)],
+                ],
+              ),
             ),
           );
         },
       );
 
-  Widget _heading(String n, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(children: [
-          CircleAvatar(radius: 12, backgroundColor: WmColors.greenTint, child: Text(n, style: const TextStyle(fontSize: 12, color: WmColors.green))),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-        ]),
+  /// A mono capital section title (the mockup's), replacing the numbered headings.
+  Widget _section(String text, {bool first = false}) => Padding(
+        padding: EdgeInsets.only(top: first ? 0 : 20, bottom: 8),
+        child: Text(text, style: monoLabel),
       );
 }
 
@@ -266,6 +282,28 @@ class _PaidNow extends StatelessWidget {
   }
 }
 
+
+/// The first problem, repeated over the pinned button (the same words as by its field).
+class _FirstProblem extends StatelessWidget {
+  const _FirstProblem(this.problem);
+  final PurchaseProblem problem;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = problemCopy(problem.kind);
+    return Semantics(
+      liveRegion: true,
+      child: Text.rich(
+        key: const Key('record-first-problem'),
+        TextSpan(children: [
+          TextSpan(text: b.english, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          TextSpan(text: ' · ${b.tagalog}', style: const TextStyle(fontSize: 12)),
+        ]),
+        style: const TextStyle(color: WmColors.danger),
+      ),
+    );
+  }
+}
 
 class _ProblemText extends StatelessWidget {
   const _ProblemText(this.problem);
@@ -357,10 +395,18 @@ class _LineCard extends StatelessWidget {
     final c = controller;
     final n = index + 1;
     final places = c.places;
-    final placeIndex = l.destination == 'warehouse' ? places.indexWhere((p) => p.warehouse) : places.indexWhere((p) => p.folderId == l.folderId);
+    // A new item has no place yet: the box stays empty until the buyer picks one. (The Warehouse
+    // entry has no project id either, so matching on the id alone would show it by accident.)
+    final placeIndex = l.destination == 'warehouse'
+        ? places.indexWhere((p) => p.warehouse)
+        : (l.folderId ?? '').isEmpty
+            ? -1
+            : places.indexWhere((p) => p.folderId == l.folderId);
     return Card(
       key: Key('line-$n'),
       color: Colors.white,
+      // Flat, like every other card: the border is its edge, no shadow.
+      elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: WmColors.border)),
       child: Padding(
@@ -520,6 +566,7 @@ class _ChargeCard extends StatelessWidget {
     return Card(
       key: Key('charge-$n'),
       color: Colors.white,
+      elevation: 0,
       margin: const EdgeInsets.only(top: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: WmColors.border)),
       child: Padding(
@@ -579,22 +626,36 @@ class _ReceiptPhotos extends StatelessWidget {
         for (final slot in receiptSlots)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Row(children: [
-              Expanded(child: Text(receiptSlotLabels[slot]!, style: const TextStyle(fontWeight: FontWeight.w600))),
-              if (d.photos[slot] case final path?) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.file(File(path), key: Key('photo-$slot'), width: 52, height: 52, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const Icon(Icons.receipt_long, size: 40)),
+            child: _SlotBox(
+              dashed: d.photos[slot] == null,
+              child: Row(children: [
+                Expanded(
+                  child: Text(receiptSlotLabels[slot]!,
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: d.photos[slot] == null ? WmColors.green : WmColors.text)),
                 ),
-                IconButton(key: Key('remove-photo-$slot'), onPressed: () => c.removePhoto(slot), icon: const Icon(Icons.close)),
-              ] else ...[
-                IconButton(
-                    key: Key('camera-$slot'), tooltip: 'Camera', onPressed: () => _add(context, slot, services.takePhoto), icon: const Icon(Icons.photo_camera_outlined)),
-                IconButton(
-                    key: Key('gallery-$slot'), tooltip: 'Gallery', onPressed: () => _add(context, slot, services.pickPhoto), icon: const Icon(Icons.photo_library_outlined)),
-              ],
-            ]),
+                if (d.photos[slot] case final path?) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(File(path), key: Key('photo-$slot'), width: 52, height: 52, fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const Icon(Icons.receipt_long, size: 40)),
+                  ),
+                  IconButton(key: Key('remove-photo-$slot'), onPressed: () => c.removePhoto(slot), icon: const Icon(Icons.close)),
+                ] else ...[
+                  IconButton(
+                      key: Key('camera-$slot'),
+                      tooltip: 'Camera',
+                      color: WmColors.green,
+                      onPressed: () => _add(context, slot, services.takePhoto),
+                      icon: const Icon(Icons.photo_camera_outlined)),
+                  IconButton(
+                      key: Key('gallery-$slot'),
+                      tooltip: 'Gallery',
+                      color: WmColors.green,
+                      onPressed: () => _add(context, slot, services.pickPhoto),
+                      icon: const Icon(Icons.photo_library_outlined)),
+                ],
+              ]),
+            ),
           ),
       CheckboxListTile(
         key: const Key('no-receipt'),
@@ -612,4 +673,45 @@ class _ReceiptPhotos extends StatelessWidget {
         ),
     ]);
   }
+}
+
+/// A receipt-photo slot: white, radius 14; dashed when it is still empty (the mockup's box).
+class _SlotBox extends StatelessWidget {
+  const _SlotBox({required this.dashed, required this.child});
+  final bool dashed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        painter: _SlotBorder(dashed),
+        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6), child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 52), child: child)),
+      );
+}
+
+class _SlotBorder extends CustomPainter {
+  _SlotBorder(this.dashed);
+  final bool dashed;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(14));
+    canvas.drawRRect(rrect, Paint()..color = Colors.white);
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = dashed ? 1.5 : 1
+      ..color = dashed ? WmColors.textFaint : WmColors.border;
+    if (!dashed) {
+      canvas.drawRRect(rrect, line);
+      return;
+    }
+    final path = Path()..addRRect(rrect);
+    for (final m in path.computeMetrics()) {
+      for (var at = 0.0; at < m.length; at += 9) {
+        canvas.drawPath(m.extractPath(at, (at + 5).clamp(0, m.length)), line);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SlotBorder old) => old.dashed != dashed;
 }

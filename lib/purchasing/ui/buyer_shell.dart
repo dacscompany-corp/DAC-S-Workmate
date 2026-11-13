@@ -288,8 +288,23 @@ class _SameItemsDialog extends StatelessWidget {
           'Continue it, or start a new one?\n'
           'Nasimulan mo na ito. Ituloy, o gumawa ng bago?'),
       actions: [
-        TextButton(key: const Key('same-items-new'), onPressed: () => Navigator.of(context).pop(false), child: const Text('Start a new one')),
-        FilledButton(key: const Key('same-items-continue'), onPressed: () => Navigator.of(context).pop(true), child: const Text('Continue it')),
+        TextButton(
+          key: const Key('same-items-new'),
+          style: TextButton.styleFrom(foregroundColor: WmColors.green),
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Start a new one'),
+        ),
+        FilledButton(
+          key: const Key('same-items-continue'),
+          style: FilledButton.styleFrom(
+            backgroundColor: WmColors.green,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 44),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Continue it'),
+        ),
       ],
     );
   }
