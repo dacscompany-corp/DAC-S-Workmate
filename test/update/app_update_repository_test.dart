@@ -87,7 +87,7 @@ void main() {
     expect(await r3.requiredRelease(), isNull);
   });
 
-  test('a body stream that fails midway is a download failure and leaves no file', () async {
+  test('a body stream that fails midway is a download failure; what arrived is kept, never as an APK', () async {
     final r = await repo(FakeSource(row(1001, apk)),
         download: MockClient.streaming((req, _) async => http.StreamedResponse(
             Stream<List<int>>.multi((c) {
@@ -95,9 +95,12 @@ void main() {
               c.addError(const SocketException('reset'));
               c.close();
             }),
-            200)));
+            200,
+            contentLength: apk.length)));
     final result = await r.download((await r.requiredRelease())!, (_) {});
     expect((result as DownloadFailed).reason, UpdateFailure.downloadFailed);
-    expect(Directory('${tmp.path}/updates').listSync(), isEmpty);
+    final left = Directory('${tmp.path}/updates').listSync();
+    expect(left.single.path, endsWith('dacs-workmate-1001.apk.part'), reason: 'kept so TRY AGAIN continues');
+    expect(await File(left.single.path).length(), 300);
   });
 }

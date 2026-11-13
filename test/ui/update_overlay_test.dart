@@ -42,7 +42,7 @@ class _ReadyRepo extends AppUpdateRepository {
             cacheDir: () async => Directory.systemTemp);
   final File file = File('${Directory.systemTemp.path}/wm_overlay_${DateTime.now().microsecondsSinceEpoch}.apk');
   @override
-  Future<DownloadResult> download(AppRelease release, void Function(double) onProgress) async {
+  Future<DownloadResult> download(AppRelease release, void Function(double) onProgress, {DownloadPause? pause}) async {
     file.writeAsBytesSync([1]);
     return DownloadReady(file);
   }

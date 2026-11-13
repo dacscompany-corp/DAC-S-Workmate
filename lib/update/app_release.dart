@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -69,7 +70,18 @@ AppRelease? pickRequiredRelease({
   return (known != null && known.versionCode > installedVersionCode) ? known : null;
 }
 
-enum CopyResult { verified, wrongSize, wrongHash }
+enum CopyResult { verified, wrongSize, wrongHash, paused }
+
+/// The worker's PAUSE tap, handed to a running download. One per download:
+/// once requested it stays requested.
+class DownloadPause {
+  final _requested = Completer<void>();
+  bool get requested => _requested.isCompleted;
+  Future<void> get whenRequested => _requested.future;
+  void request() {
+    if (!_requested.isCompleted) _requested.complete();
+  }
+}
 
 class _DigestSink implements Sink<Digest> {
   Digest? value;
@@ -79,33 +91,82 @@ class _DigestSink implements Sink<Digest> {
   void close() {}
 }
 
+const _pausedMark = Object();
+
 /// Streams [input] into [output], hashing as it goes: one pass, so an APK is
 /// never held in memory on a 2 GB phone.
+///
+/// A download that continues after a pause passes [alreadyWritten]: the bytes
+/// already on disk, hashed and counted first but not written again, so the
+/// hash still covers the whole file. [pause] stops between chunks (or while
+/// waiting for one) and answers [CopyResult.paused] with everything received
+/// so far flushed to [output].
 Future<CopyResult> copyVerifying(
   Stream<List<int>> input,
   IOSink output, {
   required int expectedSize,
   required String expectedSha256,
   void Function(double fraction)? onProgress,
+  Stream<List<int>>? alreadyWritten,
+  DownloadPause? pause,
 }) async {
   final digestSink = _DigestSink();
   final hasher = sha256.startChunkedConversion(digestSink);
   var copied = 0;
   var lastPercent = -1;
-  await for (final chunk in input) {
-    output.add(chunk);
-    hasher.add(chunk);
-    copied += chunk.length;
-    // Longer than promised is already wrong: stop pulling bytes.
-    if (copied > expectedSize) return CopyResult.wrongSize;
+  void report() {
     final percent = expectedSize > 0 ? (copied * 100) ~/ expectedSize : 0;
     if (percent != lastPercent) {
       lastPercent = percent;
       onProgress?.call(percent / 100);
     }
   }
+
+  final chunks = StreamIterator<List<int>>(input);
+  try {
+    if (alreadyWritten != null) {
+      await for (final chunk in alreadyWritten) {
+        hasher.add(chunk);
+        copied += chunk.length;
+      }
+      if (copied > expectedSize) return CopyResult.wrongSize;
+      report();
+    }
+    while (true) {
+      if (pause != null && pause.requested) {
+        await output.flush();
+        return CopyResult.paused;
+      }
+      final next = chunks.moveNext();
+      final bool has;
+      if (pause == null) {
+        has = await next;
+      } else {
+        final first = await Future.any<Object>([next, pause.whenRequested.then<Object>((_) => _pausedMark)]);
+        if (identical(first, _pausedMark)) {
+          await output.flush();
+          return CopyResult.paused;
+        }
+        has = first as bool;
+      }
+      if (!has) break;
+      final chunk = chunks.current;
+      output.add(chunk);
+      hasher.add(chunk);
+      copied += chunk.length;
+      // Longer than promised is already wrong: stop pulling bytes.
+      if (copied > expectedSize) return CopyResult.wrongSize;
+      report();
+    }
+  } finally {
+    // Stop pulling bytes; never let a slow socket close hold the answer up.
+    try {
+      await chunks.cancel().timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
   await output.flush();
   hasher.close();
   if (copied != expectedSize) return CopyResult.wrongSize;
   return digestSink.value.toString() == expectedSha256.toLowerCase() ? CopyResult.verified : CopyResult.wrongHash;
 }
+

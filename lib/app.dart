@@ -12,6 +12,7 @@ import 'requests/requests_services.dart';
 import 'tools/tools_services.dart';
 import 'ui/gate_unavailable_screen.dart';
 import 'ui/home_shell.dart';
+import 'ui/loading_screen.dart';
 import 'ui/login_screen.dart';
 import 'ui/terms_screen.dart';
 import 'ui/theme.dart';
@@ -137,15 +138,7 @@ class _WorkMateAppState extends State<WorkMateApp> with WidgetsBindingObserver {
           builder: (context, _) {
             final c = widget.controller;
             final Widget screen = switch (c.state) {
-              Starting() => const Scaffold(
-                  body: Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Checking your account…', style: TextStyle(fontSize: 15, color: WmColors.textMuted)),
-                    ]),
-                  ),
-                ),
+              Starting() => LoadingScreen(versionName: widget.versionName),
               SignedOut(:final notice) => LoginScreen(key: ValueKey(notice), initialNotice: notice, onSignIn: c.signIn),
               NeedsTerms() => TermsScreen(onAccept: c.acceptTerms),
               TermsUnavailable() => GateUnavailableScreen(onRetry: c.retryStartup, onSignOut: c.signOut),
