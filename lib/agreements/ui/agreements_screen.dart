@@ -17,7 +17,8 @@ Future<void> showAgreementsSheet(BuildContext context, AgreementsController cont
 
 /// My agreements (Linked Labor), a sheet since Phase 5: the signed-in worker's
 /// own linked agreements, read from the server each time. An agreement opens in
-/// place (one at a time) with its works and payments. With no signal, or when
+/// place (one at a time) with its works — never its payments (owner decision
+/// 17 Nov 2026); a card with no works has nothing to open. With no signal, or when
 /// the server refuses, the amounts are gone and the sheet says why — never an
 /// old balance.
 class AgreementsSheet extends StatefulWidget {
@@ -99,10 +100,11 @@ class _AgreementsSheetState extends State<AgreementsSheet> {
         },
       );
 
-  /// The closed card is today's tile with an expand arrow; opened, it adds what
-  /// the old agreement page showed: the works covered and the payments.
+  /// The closed card is today's tile; with works to show it has an expand arrow
+  /// and opens to the works covered. No payment is ever listed.
   Widget _agreementCard(MyAgreement a) {
-    final open = _openId == a.id;
+    final canOpen = a.works.isNotEmpty;
+    final open = canOpen && _openId == a.id;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       color: Colors.white,
@@ -111,13 +113,13 @@ class _AgreementsSheetState extends State<AgreementsSheet> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         InkWell(
           key: Key('agreement-${a.id}'),
-          onTap: () => _toggle(a.id),
+          onTap: canOpen ? () => _toggle(a.id) : null,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(child: _Header(a: a)),
-                Icon(open ? Icons.expand_less : Icons.expand_more, color: WmColors.textMuted),
+                if (canOpen) Icon(open ? Icons.expand_less : Icons.expand_more, color: WmColors.textMuted),
               ]),
               const SizedBox(height: 10),
               _Money(a: a, compact: true),
@@ -128,16 +130,8 @@ class _AgreementsSheetState extends State<AgreementsSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (a.works.isNotEmpty) ...[
-                const _Label('Works covered'),
-                for (final (i, w) in a.works.indexed) Text('${i + 1}. $w', style: const TextStyle(fontSize: 14, height: 1.5)),
-                const SizedBox(height: 16),
-              ],
-              const _Label('Payments'),
-              if (a.payments.isEmpty)
-                const Text('No payments recorded yet.', style: TextStyle(color: WmColors.textMuted))
-              else
-                for (final p in a.payments) _PaymentRow(p: p),
+              const _Label('Works covered'),
+              for (final (i, w) in a.works.indexed) Text('${i + 1}. $w', style: const TextStyle(fontSize: 14, height: 1.5)),
             ]),
           ),
       ]),
@@ -212,34 +206,6 @@ class _Money extends StatelessWidget {
             padding: EdgeInsets.only(top: 4),
             child: Text('No agreed total — paid by the day.', style: TextStyle(fontSize: 12, color: WmColors.textMuted)),
           ),
-      ]),
-    );
-  }
-}
-
-class _PaymentRow extends StatelessWidget {
-  const _PaymentRow({required this.p});
-
-  final AgreementPayment p;
-
-  @override
-  Widget build(BuildContext context) {
-    // Project Control saves the date with its time ("2026-11-09T13:07", Manila
-    // wall-clock); older rows hold the day alone, a few nothing. The day is the
-    // first ten characters either way. The time is never parsed: read as UTC it
-    // would move a late-evening payment to the next day.
-    final raw = (p.date ?? '').trim();
-    final day = RegExp(r'^\d{4}-\d{2}-\d{2}').firstMatch(raw)?.group(0);
-    final d = day == null ? null : DateTime.tryParse('${day}T00:00:00+08:00');
-    final method = paymentMethodLabel(p.method);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(children: [
-        Expanded(
-          child: Text([d == null ? (raw.isEmpty ? '—' : raw) : shortDate(d), if (method.isNotEmpty) method].join(' · '),
-              style: const TextStyle(color: WmColors.textSecondary)),
-        ),
-        Text(agreementPeso(p.amount), style: const TextStyle(fontWeight: FontWeight.w700)),
       ]),
     );
   }

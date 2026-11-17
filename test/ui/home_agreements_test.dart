@@ -47,6 +47,15 @@ List<MyAgreement> juansAgreements() => [
       for (final a in (jsonDecode(myAgreementsJson)['agreements'] as List)) MyAgreement.fromJson(Map<String, dynamic>.from(a as Map)),
     ];
 
+/// The same, with works on the main agreement so its card opens (a card with no
+/// works has nothing to open since 0.18.1).
+List<MyAgreement> juansAgreementsMainOpens() => [
+      for (final a in juansAgreements()) a.id == 'a-main' ? MyAgreement.fromJson({
+        ...(jsonDecode(myAgreementsJson)['agreements'] as List).cast<Map<String, dynamic>>().firstWhere((j) => j['id'] == 'a-main'),
+        'works': ['Footing'],
+      }) : a,
+    ];
+
 void main() {
   late QueueSettled settled;
 
@@ -145,18 +154,19 @@ void main() {
 
   testWidgets('back in the app with a detail open, after an unlink: no old figure while checking, and none after', (tester) async {
     useTallPhone(tester);
-    final remote = PerAccountRemote({'w13': juansAgreements()});
+    final remote = PerAccountRemote({'w13': juansAgreementsMainOpens()});
     await tester.pumpWidget(wrap(shell(juan, AgreementsServices(remote: remote))));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('agreement-a-main')));
     await tester.pumpAndSettle();
+    expect(find.text('1. Footing'), findsOneWidget, reason: 'the detail is open');
     expect(find.text('₱50,000.00'), findsOneWidget);
     // While the app was away, the office unlinked that agreement.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     remote
-      ..byUser['w13'] = juansAgreements().where((a) => a.id != 'a-main').toList()
+      ..byUser['w13'] = juansAgreementsMainOpens().where((a) => a.id != 'a-main').toList()
       ..gate = Completer<void>();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();

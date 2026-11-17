@@ -27,16 +27,23 @@ void main() {
       final list = all();
       final main = list[0], aw = list[1], daily = list[2], over = list[3];
       expect([main.daily, main.agreed, main.paid, main.balance, main.progressPct], [false, 50000.0, 20000.0, 30000.0, 25.0]);
-      expect(main.payments.map((p) => [p.date, p.amount, p.method]).toList(), [
-        ['2026-10-08', 10000.0, 'gcash'],
-        ['2026-10-01', 10000.0, 'cash'],
-      ]);
       expect([aw.mainProject, aw.works, aw.progressPct], ['Alpha House', ['Wall', 'Coping'], 80.0]);
       expect([daily.daily, daily.agreed, daily.balance, daily.paid, daily.ended, daily.projectCompleted, daily.progressPct],
           [true, null, null, 700.0, true, true, null]);
       expect(daily.endedAt, DateTime.utc(2026, 11, 3, 2));
       expect([over.overPaid, over.balance], [true, -500.0]);
       expect(main.overPaid, isFalse);
+    });
+
+    test('a 0113 answer with a payment list reads the same totals, and the model keeps no list', () {
+      final legacy = [
+        for (final a in (jsonDecode(legacyAgreementsJson)['agreements'] as List)) MyAgreement.fromJson(Map<String, dynamic>.from(a as Map)),
+      ];
+      final now = all();
+      for (var i = 0; i < now.length; i++) {
+        expect([legacy[i].agreed, legacy[i].paid, legacy[i].balance, legacy[i].overPaid],
+            [now[i].agreed, now[i].paid, now[i].balance, now[i].overPaid]);
+      }
     });
 
     test('a daily agreement never carries an agreed total or a balance, whatever arrives', () {

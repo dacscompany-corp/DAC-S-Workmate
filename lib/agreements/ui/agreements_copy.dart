@@ -29,14 +29,6 @@ Bilingual agreementsFailureCopy(AgreementsFailure f) => switch (f) {
           'Your agreements could not be shown. Try again later.', 'Hindi maipakita ang mga kasunduan mo. Subukan ulit mamaya.'),
     };
 
-String paymentMethodLabel(String? m) => switch (m) {
-      'cash' => 'Cash',
-      'gcash' => 'GCash',
-      'bank_transfer' => 'Bank transfer',
-      'cheque' => 'Cheque',
-      _ => '',
-    };
-
 /// "₱1,250.50" (never a minus sign: an overpayment reads "Over by").
 String agreementPeso(num v) {
   final fixed = v.abs().toStringAsFixed(2);

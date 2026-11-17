@@ -45,11 +45,20 @@ void main() {
   }
 
   Future<void> openCard(WidgetTester tester, String id) async {
-    await tester.ensureVisible(find.byKey(Key('agreement-$id')));
+    await tester.ensureVisible(find.byKey(Key('agreement-$id'), skipOffstage: false));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('agreement-$id')));
     await tester.pumpAndSettle();
   }
+
+  /// The 0115 sample with works on the main agreement too, so two cards can open.
+  List<MyAgreement> withMainWorks() => [
+        for (final a in (jsonDecode(myAgreementsJson)['agreements'] as List))
+          MyAgreement.fromJson({
+            ...Map<String, dynamic>.from(a as Map),
+            if (a['id'] == 'a-main') 'works': ['Footing'],
+          }),
+      ];
 
   testWidgets('fixed: Agreed, Paid so far, Balance; project progress, labelled as the project’s', (tester) async {
     remote.answers.add(all());
@@ -100,42 +109,64 @@ void main() {
     expect(find.descendant(of: tile, matching: find.textContaining('100')), findsNothing);
   });
 
-  testWidgets('the detail lists the works and each payment as date · method · amount', (tester) async {
+  /// No payment list on a card, closed or opened (owner decision 17 Nov 2026).
+  void expectNoPaymentList() {
+    expect(find.text('Payments'), findsNothing);
+    expect(find.textContaining('No payments recorded'), findsNothing);
+    expect(find.textContaining('GCash'), findsNothing);
+    expect(find.textContaining('Bank'), findsNothing);
+    expect(find.textContaining(' · Cash'), findsNothing);
+    expect(find.textContaining('Oct 2026 ·'), findsNothing);
+  }
+
+  testWidgets('no payment list on any card, closed or opened; the works stay', (tester) async {
     remote.answers.add(all());
     await c.refresh();
     await openSheet(tester);
-    await openCard(tester, 'a-main');
-    expect(find.text('8 Oct 2026 · GCash'), findsOneWidget);
-    expect(find.text('1 Oct 2026 · Cash'), findsOneWidget);
+    expectNoPaymentList();
+    for (final id in ['a-main', 'a-aw', 'a-daily', 'a-over']) {
+      await openSheet(tester);
+      await openCard(tester, id);
+      expectNoPaymentList();
+    }
     await openSheet(tester);
     await openCard(tester, 'a-aw');
+    expect(find.text('WORKS COVERED'), findsOneWidget); // the label is drawn in capitals
     expect(find.text('1. Wall'), findsOneWidget);
     expect(find.text('2. Coping'), findsOneWidget);
-    expect(find.text('No payments recorded yet.'), findsOneWidget);
   });
 
-  testWidgets('a payment date saved with its time (or with none) still reads as its day', (tester) async {
-    // Project Control saves a payment's date with the time, "2026-11-09T13:07"
-    // (Manila wall-clock): 241 of 243 real contract payments on 10 Nov 2026.
-    // The pilot's detail showed that raw text. A late-evening time keeps its own
-    // day, and an empty date reads as a dash.
+  testWidgets('a 0113 answer that still carries payments draws no list', (tester) async {
     remote.answers.add([
-      MyAgreement.fromJson(Map<String, dynamic>.from(jsonDecode('''
-        {"id": "a-time", "project": "Alpha House", "main_project": null, "project_completed": false, "progress_pct": null,
-         "scope": "Glass", "trade": "", "pay_basis": "fixed", "works": [], "agreed": 1000, "paid": 300, "balance": 700,
-         "ended": false, "ended_at": null,
-         "payments": [{"date": "2026-11-09T13:07", "amount": 100, "method": "gcash"},
-                      {"date": "2026-11-08T23:45", "amount": 100, "method": "cash"},
-                      {"date": "", "amount": 100, "method": "gcash"}]}''') as Map)),
+      for (final a in (jsonDecode(legacyAgreementsJson)['agreements'] as List))
+        MyAgreement.fromJson({
+          ...Map<String, dynamic>.from(a as Map),
+          if (a['id'] == 'a-main') 'works': ['Footing'], // so the card opens: works AND a payment list
+        }),
     ]);
     await c.refresh();
     await openSheet(tester);
-    await openCard(tester, 'a-time');
-    expect(find.text('9 Nov 2026 · GCash'), findsOneWidget);
-    expect(find.text('8 Nov 2026 · Cash'), findsOneWidget);
-    expect(find.text('— · GCash'), findsOneWidget);
-    expect(find.textContaining('T13:07'), findsNothing);
-    expect(find.textContaining('T23:45'), findsNothing);
+    await openCard(tester, 'a-main');
+    expect(find.text('1. Footing'), findsOneWidget, reason: 'the card is open');
+    expectNoPaymentList();
+    expect(find.text('₱10,000.00'), findsNothing); // a single payment's amount
+    final tile = find.byKey(const Key('agreement-a-main'));
+    expect(find.descendant(of: tile, matching: find.text('₱20,000.00')), findsOneWidget); // Paid so far stays
+  });
+
+  testWidgets('paid in full reads Balance ₱0.00', (tester) async {
+    remote.answers.add([
+      MyAgreement.fromJson(Map<String, dynamic>.from(jsonDecode('''
+        {"id": "a-full", "project": "Delta House", "main_project": null, "project_completed": false, "progress_pct": 100,
+         "scope": "Roofing", "trade": "", "pay_basis": "fixed", "works": [], "agreed": 2000, "paid": 2000, "balance": 0,
+         "ended": false, "ended_at": null}''') as Map)),
+    ]);
+    await c.refresh();
+    await openSheet(tester);
+    final tile = find.byKey(const Key('agreement-a-full'));
+    expect(find.descendant(of: tile, matching: find.text('Balance')), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text('₱0.00')), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text('Over by')), findsNothing);
   });
 
   testWidgets('no signal on refresh: every amount leaves the screen, and it says it needs signal', (tester) async {
@@ -151,12 +182,13 @@ void main() {
   });
 
   testWidgets('an open agreement that is unlinked shows no amount any more', (tester) async {
-    remote.answers.add(all());
+    remote.answers.add(withMainWorks());
     await c.refresh();
     await openSheet(tester);
     await openCard(tester, 'a-main');
+    expect(find.text('1. Footing'), findsOneWidget, reason: 'the card is open');
     expect(find.text('₱50,000.00'), findsOneWidget);
-    remote.answers.add(all().where((a) => a.id != 'a-main').toList());
+    remote.answers.add(withMainWorks().where((a) => a.id != 'a-main').toList());
     await c.refresh();
     await tester.pumpAndSettle();
     expect(find.text('₱50,000.00'), findsNothing, reason: 'the unlinked agreement’s figures are gone (the others stay listed)');
@@ -184,13 +216,14 @@ void main() {
   });
 
   testWidgets('an open detail shows no figure while checking, and says so when it was unlinked', (tester) async {
-    remote.answers.add(all());
+    remote.answers.add(withMainWorks());
     await c.refresh();
     await openSheet(tester);
     await openCard(tester, 'a-main');
+    expect(find.text('1. Footing'), findsOneWidget, reason: 'the card is open');
     expect(find.text('₱50,000.00'), findsOneWidget);
     remote.gate = Completer<void>();
-    remote.answers.add(all().where((a) => a.id != 'a-main').toList());
+    remote.answers.add(withMainWorks().where((a) => a.id != 'a-main').toList());
     final pending = c.refresh();
     await tester.pump();
     expect(find.textContaining('₱'), findsNothing);
@@ -229,32 +262,45 @@ void main() {
   });
 
   testWidgets('a card opens in place; opening a second one closes the first', (tester) async {
-    remote.answers.add(all());
+    remote.answers.add(withMainWorks());
     await c.refresh();
     await openSheet(tester);
-    expect(find.text('No payments recorded yet.'), findsNothing, reason: 'closed cards show no payments');
+    expect(find.text('1. Footing'), findsNothing, reason: 'closed cards show no works');
     await openCard(tester, 'a-main');
-    expect(find.text('8 Oct 2026 · GCash'), findsOneWidget);
+    expect(find.text('1. Footing'), findsOneWidget);
     expect(find.byKey(const Key('agreements-sheet')), findsOneWidget, reason: 'still the sheet, no second page');
     await openCard(tester, 'a-aw');
-    expect(find.text('8 Oct 2026 · GCash'), findsNothing, reason: 'the first card closed');
+    expect(find.text('1. Footing'), findsNothing, reason: 'the first card closed');
     expect(find.text('1. Wall'), findsOneWidget);
     await openCard(tester, 'a-aw');
     expect(find.text('1. Wall'), findsNothing, reason: 'tapping the open card closes it');
   });
 
-  testWidgets('an open agreement that disappears collapses without an error and says so', (tester) async {
+  testWidgets('a card with no works has no arrow and does not open', (tester) async {
     remote.answers.add(all());
     await c.refresh();
     await openSheet(tester);
+    Finder inCard(String id, Finder f) => find.descendant(of: find.byKey(Key('agreement-$id')), matching: f);
+    expect(inCard('a-aw', find.byIcon(Icons.expand_more)), findsOneWidget, reason: 'it has works to show');
+    for (final id in ['a-main', 'a-daily', 'a-over']) {
+      expect(inCard(id, find.byIcon(Icons.expand_more)), findsNothing, reason: '$id has nothing behind it');
+      await openCard(tester, id);
+      expect(find.byIcon(Icons.expand_less), findsNothing, reason: '$id did not open');
+    }
+  });
+
+  testWidgets('an open agreement that disappears collapses without an error and says so', (tester) async {
+    remote.answers.add(withMainWorks());
+    await c.refresh();
+    await openSheet(tester);
     await openCard(tester, 'a-main');
-    expect(find.text('8 Oct 2026 · GCash'), findsOneWidget);
-    remote.answers.add(all().where((a) => a.id != 'a-main').toList());
+    expect(find.text('1. Footing'), findsOneWidget);
+    remote.answers.add(withMainWorks().where((a) => a.id != 'a-main').toList());
     await c.refresh();
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('agreement-a-main')), findsNothing);
-    expect(find.text('8 Oct 2026 · GCash'), findsNothing);
+    expect(find.text('1. Footing'), findsNothing);
     expect(find.textContaining('isn’t shown to you any more'), findsOneWidget);
     expect(find.byKey(const Key('agreement-a-aw')), findsOneWidget, reason: 'the others stay');
   });
