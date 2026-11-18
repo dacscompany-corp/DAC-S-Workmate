@@ -159,9 +159,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('shortcut-agreements')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('agreement-a-main')));
+    await tester.tap(find.byKey(const Key('agreement-tab-a-main')));
     await tester.pumpAndSettle();
-    expect(find.text('1. Footing'), findsOneWidget, reason: 'the detail is open');
+    expect(find.text('Footing'), findsOneWidget, reason: 'the agreement is open');
     expect(find.text('₱50,000.00'), findsOneWidget);
     // While the app was away, the office unlinked that agreement.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);

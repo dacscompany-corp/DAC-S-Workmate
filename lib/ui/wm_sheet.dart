@@ -32,7 +32,8 @@ class WmSheetFrame extends StatefulWidget {
     this.subtitle,
     this.onBack,
     this.tall = false,
-    required this.children,
+    this.children = const [],
+    this.body,
     this.footer,
     this.action,
   });
@@ -46,6 +47,11 @@ class WmSheetFrame extends StatefulWidget {
   /// 92 % of the screen whatever the content; otherwise as tall as the content.
   final bool tall;
   final List<Widget> children;
+
+  /// In place of [children]: one widget that fills the body and lays out (and
+  /// scrolls, and pads above the phone's bottom edge) by itself — My
+  /// agreements' tabs over their own list, or a state centred in the sheet.
+  final Widget? body;
   final Widget? footer;
 
   /// A small button laid out immediately left of the close button (Record
@@ -148,7 +154,7 @@ class _WmSheetFrameState extends State<WmSheetFrame> {
             ),
             Flexible(
               fit: widget.tall ? FlexFit.tight : FlexFit.loose,
-              child: ListView(
+              child: widget.body ?? ListView(
                 shrinkWrap: !widget.tall,
                 padding: EdgeInsets.fromLTRB(20, 6, 20, 20 + (footer == null ? safeBottom : 0)),
                 children: widget.children,
